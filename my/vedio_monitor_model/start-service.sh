@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+repo_root="${SYMPHONY_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 workflow="$repo_root/my/vedio_monitor_model/WORKFLOW.md"
 logs_root="${SYMPHONY_LOGS_ROOT:-$HOME/code/vedio-monitor-model-symphony-logs}"
 port="${SYMPHONY_PORT:-4102}"
