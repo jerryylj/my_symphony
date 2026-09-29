@@ -28,6 +28,7 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
     assert settings.tracker.active_states == ["open"]
     assert settings.tracker.terminal_states == ["closed"]
     assert settings.agent.max_concurrent_agents == 1
+    assert settings.hooks.timeout_ms == 300_000
 
     assert settings.hooks.after_create =~ "gh repo clone jerryylj/vedio_monitor_model ."
     assert settings.codex.command =~ "--profile volcengine"

@@ -14,6 +14,7 @@ polling:
 workspace:
   root: ~/code/vedio-monitor-model-symphony-workspaces
 hooks:
+  timeout_ms: 300000
   after_create: |
     gh repo clone jerryylj/vedio_monitor_model . -- --depth 1
 agent:
