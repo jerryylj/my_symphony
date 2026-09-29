@@ -65,6 +65,25 @@ Use Symphony's configured `github_api` tool for all GitHub issue reads, comments
 changes. Do not read, copy, or forward tracker credentials. Do not use the GitHub API tool for
 unrelated issues.
 
+## Recovery gate
+
+Before starting or retrying development, check whether the current issue already has an associated
+merged pull request:
+
+1. Determine the current GitHub issue number from `GH-<number>`. Never treat this number as a pull
+   request number.
+2. Inspect the issue timeline with
+   `GET /repos/jerryylj/my_symphony/issues/{current_number}/timeline` and collect cross-references
+   whose source is a pull request. If the workspace is on a non-default branch, also look up
+   `GET /repos/jerryylj/my_symphony/pulls?head=jerryylj:<branch>&state=all`.
+3. For each candidate, fetch its real pull request with
+   `GET /repos/jerryylj/my_symphony/pulls/{candidate_pr_number}`.
+4. If exactly one candidate is already merged into the repository's default branch, skip `$implement`,
+   `$push`, and `$land`, then go directly to recovery handoff below. Do not repeat development.
+5. If more than one merged PR is associated with the issue, record the ambiguity on the issue, leave
+   it open, and do not label any successor.
+6. If no associated PR is merged, continue with the normal execution flow.
+
 ## Execution
 
 1. Parse the numeric ticket number from `GH-<number>`. Treat that issue as current.
@@ -73,21 +92,27 @@ unrelated issues.
    branch. Never base work on a predecessor ticket's changes.
 3. Invoke Matt's `$implement` skill for the current ticket. That skill owns the implementation loop:
    use `$tdd` where a pre-agreed seam exists, run typechecking and targeted tests regularly, run the
-   complete relevant test suite once at the end, and commit the work to the current branch.
-4. After `$implement` completes, run Matt's `$code-review` skill against the branch's fixed point.
-   Address valid findings, rerun the affected validation, and repeat the loop until review passes.
-5. Publish with Matt's `$push` skill and merge with Matt's `$land` skill only through their existing
+   complete relevant test suite once at the end, run its own review step, and commit the work to the
+   current branch. Do not invoke `$code-review` separately after `$implement`.
+4. Publish with Matt's `$push` skill and merge with Matt's `$land` skill only through their existing
    flows. Do not merge directly and do not weaken a landing gate.
+5. Require `$push` to include `Closes #<current_number>` in the PR body so the issue has a durable
+   association with its PR.
 6. Keep a concise status comment on the current issue at meaningful handoff points and whenever a
    blocker or human confirmation is required. Do not add duplicate status comments.
 
 ## Handoff
 
-A handoff is valid only after `$land` confirms that the current pull request is actually merged into
-the repository's default branch. Verify this independently through `github_api`:
+A handoff is valid only after `$land` confirms that the current ticket's actual pull request is
+merged into the repository's default branch. Use the PR number or URL returned by `$push` or
+`$land`; if it is unavailable, resolve it from the current branch with
+`GET /repos/jerryylj/my_symphony/pulls?head=jerryylj:<branch>&state=all`. Never substitute the
+current issue number for the PR number.
+
+Verify that real PR through `github_api`:
 
 1. `GET /repos/jerryylj/my_symphony` and record `default_branch`.
-2. `GET /repos/jerryylj/my_symphony/pulls/{current_number}` and require:
+2. `GET /repos/jerryylj/my_symphony/pulls/{actual_pr_number}` and require:
    - `state` is `closed`,
    - `merged` is true,
    - `base.ref` equals `default_branch`.
@@ -107,6 +132,10 @@ After a valid merge, advance by exactly one GitHub number:
    enablement, recovery must add the missing label first, then close the current issue once.
 6. If there is no valid successor, close the current issue after the merge verification and stop
    successfully.
+
+When entering recovery handoff because the recovery gate found an already merged PR, perform only
+the post-merge steps: verify the real PR, idempotently ensure the immediate successor has
+`agent-ready`, then close the current issue. Do not run `$implement`, `$push`, or `$land` again.
 
 Never label a successor while the current issue is unmerged, blocked, awaiting confirmation, or
 otherwise incomplete. Never label more than the immediate successor. Symphony retains its normal
