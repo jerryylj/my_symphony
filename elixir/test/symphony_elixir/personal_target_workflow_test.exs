@@ -33,7 +33,11 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
     assert settings.hooks.after_create =~ "gh repo clone jerryylj/vedio_monitor_model ."
     assert settings.hooks.after_create =~ "GIT_CONFIG_VALUE_0=HTTP/1.1"
     assert settings.hooks.after_create =~ "http_proxy=http://127.0.0.1:7890"
-    assert settings.codex.command =~ "--profile volcengine"
+    refute settings.codex.command =~ "--profile"
+    assert settings.codex.command =~ ~s(model="ark-code-latest")
+    assert settings.codex.command =~ ~s(model_provider="volcengine")
+    assert settings.codex.command =~ ~s(model_reasoning_effort="low")
+    assert settings.codex.command =~ "model_providers.volcengine.base_url"
 
     Enum.each(
       [
