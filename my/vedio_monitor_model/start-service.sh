@@ -7,7 +7,7 @@ logs_root="${SYMPHONY_LOGS_ROOT:-$HOME/code/vedio-monitor-model-symphony-logs}"
 port="${SYMPHONY_PORT:-4102}"
 escript="${MISE_ESCRIPT:-$HOME/.local/share/mise/installs/erlang/28.5/bin/escript}"
 
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+export PATH="$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 env_file="${SYMPHONY_GITHUB_TOKEN_FILE:-$HOME/.config/symphony/vedio-monitor-model/GITHUB_TOKEN}"
 
 if [[ -r "$env_file" ]]; then
