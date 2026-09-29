@@ -16,6 +16,14 @@ workspace:
 hooks:
   timeout_ms: 300000
   after_create: |
+    GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0=http.version \
+    GIT_CONFIG_VALUE_0=HTTP/1.1 \
+    http_proxy=http://127.0.0.1:7890 \
+    https_proxy=http://127.0.0.1:7890 \
+    all_proxy=http://127.0.0.1:7890 \
+    no_proxy=localhost,127.0.0.1 \
+    NO_PROXY=localhost,127.0.0.1 \
     gh repo clone jerryylj/vedio_monitor_model . -- --depth 1
 agent:
   max_concurrent_agents: 1

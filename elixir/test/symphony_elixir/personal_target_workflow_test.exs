@@ -31,6 +31,8 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
     assert settings.hooks.timeout_ms == 300_000
 
     assert settings.hooks.after_create =~ "gh repo clone jerryylj/vedio_monitor_model ."
+    assert settings.hooks.after_create =~ "GIT_CONFIG_VALUE_0=HTTP/1.1"
+    assert settings.hooks.after_create =~ "http_proxy=http://127.0.0.1:7890"
     assert settings.codex.command =~ "--profile volcengine"
 
     Enum.each(
