@@ -28,6 +28,8 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
     assert settings.tracker.active_states == ["open"]
     assert settings.tracker.terminal_states == ["closed"]
     assert settings.agent.max_concurrent_agents == 1
+    assert settings.agent.max_turns == 2
+    assert settings.agent.block_on_max_turns
     assert settings.hooks.timeout_ms == 300_000
 
     assert settings.hooks.after_create =~ "gh repo clone jerryylj/vedio_monitor_model ."
@@ -38,6 +40,12 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
     assert settings.codex.command =~ ~s(model_provider="volcengine")
     assert settings.codex.command =~ ~s(model_reasoning_effort="low")
     assert settings.codex.command =~ "model_providers.volcengine.base_url"
+
+    assert settings.codex.command =~
+             ~s(plugins."unified-computer-use@openai-bundled".enabled=false)
+
+    assert settings.codex.command =~
+             ~s(plugins."computer-use@openai-bundled".enabled=false)
 
     Enum.each(
       [
@@ -61,5 +69,6 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
     assert prompt =~ "successor_number = current_number + 1"
     assert prompt =~ "Only after confirming that the immediate successor has `agent-ready`, close the current issue"
     assert prompt =~ "Never label a successor while the current issue is unmerged"
+    assert prompt =~ "Creating or publishing a pull request is not ticket completion"
   end
 end

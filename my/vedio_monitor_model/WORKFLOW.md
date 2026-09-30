@@ -27,9 +27,10 @@ hooks:
     gh repo clone jerryylj/vedio_monitor_model . -- --depth 1
 agent:
   max_concurrent_agents: 1
-  max_turns: 40
+  max_turns: 2
+  block_on_max_turns: true
 codex:
-  command: env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u no_proxy -u NO_PROXY codex app-server --config shell_environment_policy.inherit=all --config 'model="ark-code-latest"' --config 'model_provider="volcengine"' --config 'model_reasoning_effort="low"' --config 'model_catalog_json="/Users/yd/.codex/model-catalogs/volcengine-glm-5-3-flash.json"' --config 'model_providers.volcengine.name="Volcengine"' --config 'model_providers.volcengine.base_url="https://ark.cn-beijing.volces.com/api/coding/v3"' --config 'model_providers.volcengine.env_key="ARK_API_KEY"' --config 'model_providers.volcengine.wire_api="responses"'
+  command: env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u no_proxy -u NO_PROXY codex app-server --config shell_environment_policy.inherit=all --config 'plugins."unified-computer-use@openai-bundled".enabled=false' --config 'plugins."computer-use@openai-bundled".enabled=false' --config 'model="ark-code-latest"' --config 'model_provider="volcengine"' --config 'model_reasoning_effort="low"' --config 'model_catalog_json="/Users/yd/.codex/model-catalogs/volcengine-glm-5-3-flash.json"' --config 'model_providers.volcengine.name="Volcengine"' --config 'model_providers.volcengine.base_url="https://ark.cn-beijing.volces.com/api/coding/v3"' --config 'model_providers.volcengine.env_key="ARK_API_KEY"' --config 'model_providers.volcengine.wire_api="responses"'
   approval_policy: never
   thread_sandbox: workspace-write
   turn_sandbox_policy:
@@ -111,6 +112,15 @@ merged pull request:
    the current issue before handoff is complete.
 6. Keep a concise status comment on the current issue at meaningful handoff points and whenever a
    blocker or human confirmation is required. Do not add duplicate status comments.
+
+## Completion gate
+
+Creating or publishing a pull request is not ticket completion. After `$push`, invoke `$land` in
+the same turn; do not respond that the pull request is "awaiting landing". If `$land` reports a
+real, unresolved external blocker, write that exact blocker on the current issue and stop. Before
+ending any continuation turn, first inspect the current issue's associated pull request: an open
+pull request requires `$land`; a merged pull request requires the handoff below. Never spend a
+continuation turn on unrelated implementation once a pull request exists.
 
 ## Handoff
 
