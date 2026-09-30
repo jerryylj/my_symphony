@@ -56,7 +56,10 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
     )
 
     assert prompt =~ "jerryylj/vedio_monitor_model"
+    assert prompt =~ "Refs #<current_number>"
+    refute prompt =~ "Closes #<current_number>"
     assert prompt =~ "successor_number = current_number + 1"
+    assert prompt =~ "Only after confirming that the immediate successor has `agent-ready`, close the current issue"
     assert prompt =~ "Never label a successor while the current issue is unmerged"
   end
 end

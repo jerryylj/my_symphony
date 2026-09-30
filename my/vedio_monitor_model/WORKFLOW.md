@@ -106,8 +106,9 @@ merged pull request:
    current branch. Do not invoke `$code-review` separately after `$implement`.
 4. Publish with Matt's `$push` skill and merge with Matt's `$land` skill only through their existing
    flows. Do not merge directly and do not weaken a landing gate.
-5. Require `$push` to include `Closes #<current_number>` in the PR body so the issue has a durable
-   association with its PR.
+5. Require `$push` to include `Refs #<current_number>` in the PR body so the issue has a durable
+   association with its PR. Do not use auto-close keywords such as `Closes`; GitHub must not close
+   the current issue before handoff is complete.
 6. Keep a concise status comment on the current issue at meaningful handoff points and whenever a
    blocker or human confirmation is required. Do not add duplicate status comments.
 
@@ -136,10 +137,11 @@ After a valid merge, advance by exactly one GitHub number:
 3. If the successor is absent, closed, or contains a `pull_request` object, close the current issue
    and end the sequence successfully. Do not skip it or select another issue.
 4. If the successor is an open issue, inspect its labels. Add `agent-ready` only if that label is
-   missing. Retry transient GitHub failures, but do not mark the current issue complete until the
-   label has been confirmed.
-5. If the current issue is still open, close it. If a process was interrupted after successor
-   enablement, recovery must add the missing label first, then close the current issue once.
+   missing. Retry transient GitHub failures and confirm the label is present before any other
+   handoff action.
+5. Only after confirming that the immediate successor has `agent-ready`, close the current issue.
+   If a process was interrupted after successor enablement, recovery must add the missing label
+   first, then close the current issue once.
 6. If there is no valid successor, close the current issue after the merge verification and stop
    successfully.
 
