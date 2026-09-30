@@ -128,6 +128,8 @@ defmodule SymphonyElixir.AgentRunner do
         {:continue, refreshed_issue} ->
           Logger.info("Reached agent.max_turns for #{issue_context(refreshed_issue)} with issue still active; returning control to orchestrator")
 
+          notify_max_turns_reached(codex_update_recipient, refreshed_issue, turn_session, max_turns)
+
           :ok
 
         {:done, _refreshed_issue} ->
@@ -141,7 +143,29 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp build_turn_prompt(issue, opts, 1, _max_turns), do: PromptBuilder.build_prompt(issue, opts)
 
+  defp build_turn_prompt(_issue, _opts, 2, 2) do
+    if Config.settings!().agent.block_on_max_turns do
+      """
+      Finalization guidance:
+
+      - This is the only follow-up turn before Symphony stops this still-active issue.
+      - If you created or found an open pull request for the current issue, invoke `$land` now. An
+        open pull request is not completion and "awaiting landing" is not an acceptable final status.
+      - If `$land` cannot merge because of a real external blocker, add one concise comment to the
+        current issue with that exact blocker, then end the turn. Do not make unrelated code changes.
+      - If the pull request has merged, finish the workflow's required handoff and close the current
+        issue in the stated order.
+      """
+    else
+      continuation_prompt(2, 2)
+    end
+  end
+
   defp build_turn_prompt(_issue, _opts, turn_number, max_turns) do
+    continuation_prompt(turn_number, max_turns)
+  end
+
+  defp continuation_prompt(turn_number, max_turns) do
     """
     Continuation guidance:
 
@@ -171,6 +195,20 @@ defmodule SymphonyElixir.AgentRunner do
   end
 
   defp continue_with_issue?(issue, _issue_state_fetcher), do: {:done, issue}
+
+  defp notify_max_turns_reached(recipient, %Issue{id: issue_id}, turn_session, max_turns)
+       when is_pid(recipient) and is_binary(issue_id) and is_integer(max_turns) do
+    send(recipient, {
+      :agent_run_max_turns_reached,
+      issue_id,
+      turn_session[:session_id],
+      max_turns
+    })
+
+    :ok
+  end
+
+  defp notify_max_turns_reached(_recipient, _issue, _turn_session, _max_turns), do: :ok
 
   defp active_issue_state?(state_name) when is_binary(state_name) do
     normalized_state = normalize_issue_state(state_name)
