@@ -1,7 +1,7 @@
 tracker:
   kind: github
   required_labels:
-    - agent-ready
+    - ready-for-agent
   active_states:
     - open
   terminal_states:
