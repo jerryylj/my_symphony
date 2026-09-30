@@ -1,0 +1,165 @@
+---
+tracker:
+  kind: github
+  provider:
+    repo: jerryylj/stock_manage
+  required_labels:
+    - agent-ready
+  active_states:
+    - open
+  terminal_states:
+    - closed
+polling:
+  interval_ms: 5000
+workspace:
+  root: ~/code/stock-manage-symphony-workspaces
+hooks:
+  timeout_ms: 300000
+  after_create: |
+    GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0=http.version \
+    GIT_CONFIG_VALUE_0=HTTP/1.1 \
+    http_proxy=http://127.0.0.1:7890 \
+    https_proxy=http://127.0.0.1:7890 \
+    all_proxy=http://127.0.0.1:7890 \
+    no_proxy=localhost,127.0.0.1 \
+    NO_PROXY=localhost,127.0.0.1 \
+    gh repo clone jerryylj/stock_manage . -- --depth 1
+agent:
+  max_concurrent_agents: 1
+  max_turns: 2
+  block_on_max_turns: true
+codex:
+  command: env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u no_proxy -u NO_PROXY codex app-server --config shell_environment_policy.inherit=all --config 'plugins."unified-computer-use@openai-bundled".enabled=false' --config 'plugins."computer-use@openai-bundled".enabled=false' --config 'model="ark-code-latest"' --config 'model_provider="volcengine"' --config 'model_reasoning_effort="low"' --config 'model_catalog_json="/Users/yd/.codex/model-catalogs/volcengine-glm-5-3-flash.json"' --config 'model_providers.volcengine.name="Volcengine"' --config 'model_providers.volcengine.base_url="https://ark.cn-beijing.volces.com/api/coding/v3"' --config 'model_providers.volcengine.env_key="ARK_API_KEY"' --config 'model_providers.volcengine.wire_api="responses"'
+  approval_policy: never
+  thread_sandbox: workspace-write
+  turn_sandbox_policy:
+    type: workspaceWrite
+    networkAccess: true
+---
+
+You are executing GitHub Issue `{{ issue.identifier }}` in `jerryylj/stock_manage`.
+
+Issue context:
+
+- Title: `{{ issue.title }}`
+- State: `{{ issue.state }}`
+- Labels: `{{ issue.labels }}`
+- URL: `{{ issue.url }}`
+
+Description:
+
+{% if issue.description %}
+{{ issue.description }}
+{% else %}
+No description was provided.
+{% endif %}
+
+{% if attempt %}
+This is attempt `{{ attempt }}`. Resume from the existing workspace. Reconcile what was already
+done before doing it again. Never release a successor merely because a previous attempt ended.
+{% endif %}
+
+This is an unattended serial ticket sequence. There may be no human available to answer questions.
+Do not invent missing product behavior. If a required external tool, permission, secret, or ticket
+decision is missing, use `github_api` to record the blocker on the current issue, leave it open, and
+stop without touching any other issue.
+
+## Scope
+
+Implement only the current issue. Do not modify Symphony source, bundled workflow examples,
+project documentation, tests, or checked-in skills unless the issue explicitly requires it. Do not
+modify or replace Matt's skills.
+
+Use Symphony's configured `github_api` tool for all GitHub issue reads, comments, labels, and state
+changes. Do not read, copy, or forward tracker credentials. Do not use the GitHub API tool for
+unrelated issues.
+
+## Recovery gate
+
+Before starting or retrying development, check whether the current issue already has an associated
+merged pull request:
+
+1. Determine the current GitHub issue number from `GH-<number>`. Never treat this number as a pull
+   request number.
+2. Inspect the issue timeline with
+   `GET /repos/jerryylj/stock_manage/issues/{current_number}/timeline` and collect
+   cross-references whose source is a pull request. If the workspace is on a non-default branch,
+   also look up
+   `GET /repos/jerryylj/stock_manage/pulls?head=jerryylj:<branch>&state=all`.
+3. For each candidate, fetch its real pull request with
+   `GET /repos/jerryylj/stock_manage/pulls/{candidate_pr_number}`.
+4. If exactly one candidate is already merged into the repository's default branch, skip `$implement`,
+   `$push`, and `$land`, then go directly to recovery handoff below. Do not repeat development.
+5. If more than one merged PR is associated with the issue, record the ambiguity on the issue, leave
+   it open, and do not label any successor.
+6. If no associated PR is merged, continue with the normal execution flow.
+
+## Execution
+
+1. Parse the numeric ticket number from `GH-<number>`. Treat that issue as current.
+2. Sync the workspace with `origin`'s default branch before implementation. If a prior attempt left
+   a valid branch, review it before deciding whether to continue it or restart from the default
+   branch. Never base work on a predecessor ticket's changes.
+3. Invoke Matt's `$implement` skill for the current ticket. That skill owns the implementation loop:
+   use `$tdd` where a pre-agreed seam exists, run typechecking and targeted tests regularly, run the
+   complete relevant test suite once at the end, run its own review step, and commit the work to the
+   current branch. Do not invoke `$code-review` separately after `$implement`.
+4. Publish with Matt's `$push` skill and merge with Matt's `$land` skill only through their existing
+   flows. Do not merge directly and do not weaken a landing gate.
+5. Require `$push` to include `Refs #<current_number>` in the PR body so the issue has a durable
+   association with its PR. Do not use auto-close keywords such as `Closes`; GitHub must not close
+   the current issue before handoff is complete.
+6. Keep a concise status comment on the current issue at meaningful handoff points and whenever a
+   blocker or human confirmation is required. Do not add duplicate status comments.
+
+## Completion gate
+
+Creating or publishing a pull request is not ticket completion. After `$push`, invoke `$land` in
+the same turn; do not respond that the pull request is "awaiting landing". If `$land` reports a
+real, unresolved external blocker, write that exact blocker on the current issue and stop. Before
+ending any continuation turn, first inspect the current issue's associated pull request: an open
+pull request requires `$land`; a merged pull request requires the handoff below. Never spend a
+continuation turn on unrelated implementation once a pull request exists.
+
+## Handoff
+
+A handoff is valid only after `$land` confirms that the current ticket's actual pull request is
+merged into the repository's default branch. Use the PR number or URL returned by `$push` or
+`$land`; if it is unavailable, resolve it from the current branch with
+`GET /repos/jerryylj/stock_manage/pulls?head=jerryylj:<branch>&state=all`. Never substitute
+the current issue number for the PR number.
+
+Verify that real PR through `github_api`:
+
+1. `GET /repos/jerryylj/stock_manage` and record `default_branch`.
+2. `GET /repos/jerryylj/stock_manage/pulls/{actual_pr_number}` and require:
+   - `state` is `closed`,
+   - `merged` is true,
+   - `base.ref` equals `default_branch`.
+3. If any check fails, the ticket remains incomplete. Leave the current issue open, record the exact
+   failed handoff check on it, and do not label any other issue.
+
+After a valid merge, advance by exactly one GitHub number:
+
+1. Compute `successor_number = current_number + 1`.
+2. `GET /repos/jerryylj/stock_manage/issues/{successor_number}`.
+3. If the successor is absent, closed, or contains a `pull_request` object, close the current issue
+   and end the sequence successfully. Do not skip it or select another issue.
+4. If the successor is an open issue, inspect its labels. Add `agent-ready` only if that label is
+   missing. Retry transient GitHub failures and confirm the label is present before any other
+   handoff action.
+5. Only after confirming that the immediate successor has `agent-ready`, close the current issue.
+   If a process was interrupted after successor enablement, recovery must add the missing label
+   first, then close the current issue once.
+6. If there is no valid successor, close the current issue after the merge verification and stop
+   successfully.
+
+When entering recovery handoff because the recovery gate found an already merged PR, perform only
+the post-merge steps: verify the real PR, idempotently ensure the immediate successor has
+`agent-ready`, then close the current issue. Do not run `$implement`, `$push`, or `$land` again.
+
+Never label a successor while the current issue is unmerged, blocked, awaiting confirmation, or
+otherwise incomplete. Never label more than the immediate successor. Symphony retains its normal
+retry behavior for the current issue; retries may continue that ticket but must not release the next
+one.
