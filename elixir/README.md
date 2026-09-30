@@ -175,6 +175,21 @@ Notes:
   `max_turns` instead of scheduling another worker session. Default: `false`.
 - If the Markdown body is blank, Symphony uses a default prompt template that includes the issue
   identifier, title, and body.
+- A project-owned workflow entry can compose shared sources with `include` and `prompt_file`:
+
+  ```yaml
+  include:
+    - ../workflow-libraries/github-serial.yml
+  prompt_file: ../workflow-libraries/github-serial.md
+  ```
+
+  `include` is an ordered list of YAML libraries. Maps merge recursively while later scalar and
+  list values replace earlier values; the entry itself wins. `prompt_file` names one Markdown
+  prompt and cannot be combined with an inline Markdown body. All sources must be relative paths
+  under the entry's sibling `workflow-libraries/` directory; the library root and referenced
+  sources cannot be symbolic links. Nested YAML libraries are allowed; cycles, missing files,
+  paths outside that directory, and prompt sources declared by libraries are rejected. Symphony
+  reloads the effective workflow when any referenced source changes.
 - Use `hooks.after_create` to bootstrap a fresh workspace. For a Git-backed repo, you can run
   `git clone ... .` there, along with any other setup commands you need.
 - If a hook needs `mise exec` inside a freshly cloned workspace, trust the repo config and fetch

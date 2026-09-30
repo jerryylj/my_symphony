@@ -1,4 +1,8 @@
 ---
+# A project workflow entry may use `include` for ordered YAML libraries and `prompt_file` for one
+# shared Markdown prompt. Both paths must be relative and remain under the sibling
+# `workflow-libraries/` directory; library roots and sources cannot be symbolic links. The entry
+# overrides library configuration.
 tracker:
   kind: linear
   provider:

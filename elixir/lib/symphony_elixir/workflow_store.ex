@@ -141,7 +141,7 @@ defmodule SymphonyElixir.WorkflowStore do
   end
 
   defp reload_current_path(path, state) do
-    case current_stamp(path) do
+    case current_stamp(state.workflow.source_paths) do
       {:ok, stamp} when stamp == state.stamp ->
         {:ok, state}
 
@@ -158,7 +158,7 @@ defmodule SymphonyElixir.WorkflowStore do
     with {:ok, workflow} <- Workflow.load(path),
          {:ok, settings} <- Schema.parse(workflow.config),
          :ok <- Config.validate_settings(settings),
-         {:ok, stamp} <- current_stamp(path) do
+         {:ok, stamp} <- current_stamp(workflow.source_paths) do
       {:ok, %State{path: path, stamp: stamp, workflow: workflow, settings: settings}}
     else
       {:error, reason} ->
@@ -166,7 +166,18 @@ defmodule SymphonyElixir.WorkflowStore do
     end
   end
 
-  defp current_stamp(path) when is_binary(path) do
+  defp current_stamp(paths) when is_list(paths) do
+    paths
+    |> Enum.uniq()
+    |> Enum.reduce_while({:ok, %{}}, fn path, {:ok, stamps} ->
+      case source_stamp(path) do
+        {:ok, stamp} -> {:cont, {:ok, Map.put(stamps, path, stamp)}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp source_stamp(path) do
     with {:ok, stat} <- File.stat(path, time: :posix),
          {:ok, content} <- File.read(path) do
       {:ok, {stat.mtime, stat.size, :erlang.phash2(content)}}

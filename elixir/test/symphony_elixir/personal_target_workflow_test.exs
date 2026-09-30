@@ -17,7 +17,7 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
       end
     end)
 
-    assert {:ok, %{config: config, prompt: prompt}} = Workflow.load(path)
+    assert {:ok, %{config: config, prompt: prompt, source_paths: source_paths}} = Workflow.load(path)
     System.put_env("GITHUB_TOKEN", "test-github-token")
     assert {:ok, settings} = Schema.parse(config)
     assert :ok = Config.validate_settings(settings)
@@ -55,11 +55,43 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
       end
     )
 
-    assert prompt =~ "jerryylj/vedio_monitor_model"
+    assert source_paths |> Enum.map(&Path.basename/1) ==
+             ["WORKFLOW.md", "github-serial.yml", "github-serial.md"]
+
+    assert prompt =~ "value from the `origin`"
+    refute prompt =~ "jerryylj/vedio_monitor_model"
     assert prompt =~ "Refs #<current_number>"
     refute prompt =~ "Closes #<current_number>"
     assert prompt =~ "successor_number = current_number + 1"
     assert prompt =~ "Only after confirming that the immediate successor has `agent-ready`, close the current issue"
     assert prompt =~ "Never label a successor while the current issue is unmerged"
+  end
+
+  test "stock manage target workflow preserves its strict two-turn policy" do
+    path = Path.expand("../../../my/stock_manage/WORKFLOW.md", __DIR__)
+    previous_github_token = System.get_env("GITHUB_TOKEN")
+
+    on_exit(fn ->
+      if previous_github_token do
+        System.put_env("GITHUB_TOKEN", previous_github_token)
+      else
+        System.delete_env("GITHUB_TOKEN")
+      end
+    end)
+
+    assert {:ok, %{config: config, prompt: prompt, source_paths: source_paths}} = Workflow.load(path)
+    System.put_env("GITHUB_TOKEN", "test-github-token")
+    assert {:ok, settings} = Schema.parse(config)
+    assert :ok = Config.validate_settings(settings)
+
+    assert settings.tracker.provider["repo"] == "jerryylj/stock_manage"
+    assert settings.agent.max_turns == 2
+    assert settings.agent.block_on_max_turns
+
+    assert source_paths |> Enum.map(&Path.basename/1) ==
+             ["WORKFLOW.md", "github-serial.yml", "github-serial.md"]
+
+    assert prompt =~ "value from the `origin`"
+    refute prompt =~ "jerryylj/stock_manage"
   end
 end

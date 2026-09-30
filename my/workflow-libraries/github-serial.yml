@@ -1,0 +1,20 @@
+tracker:
+  kind: github
+  required_labels:
+    - agent-ready
+  active_states:
+    - open
+  terminal_states:
+    - closed
+polling:
+  interval_ms: 5000
+hooks:
+  timeout_ms: 300000
+agent:
+  max_concurrent_agents: 1
+codex:
+  approval_policy: never
+  thread_sandbox: workspace-write
+  turn_sandbox_policy:
+    type: workspaceWrite
+    networkAccess: true
