@@ -67,7 +67,7 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
     assert prompt =~ "Never label a successor while the current issue is unmerged"
   end
 
-  test "stock manage target workflow preserves its strict two-turn policy" do
+  test "stock manage target workflow preserves its bounded turn policy" do
     path = Path.expand("../../../my/stock_manage/WORKFLOW.md", __DIR__)
     previous_github_token = System.get_env("GITHUB_TOKEN")
 
@@ -85,7 +85,7 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
     assert :ok = Config.validate_settings(settings)
 
     assert settings.tracker.provider["repo"] == "jerryylj/stock_manage"
-    assert settings.agent.max_turns == 2
+    assert settings.agent.max_turns == 40
     assert settings.agent.block_on_max_turns
 
     assert source_paths |> Enum.map(&Path.basename/1) ==
@@ -93,5 +93,36 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
 
     assert prompt =~ "value from the `origin`"
     refute prompt =~ "jerryylj/stock_manage"
+  end
+
+  test "GitHub target workflows supply each issue workspace with network access" do
+    paths = [
+      Path.expand("../../../my/WORKFLOW.md", __DIR__),
+      Path.expand("../../../my/stock_manage/WORKFLOW.md", __DIR__),
+      Path.expand("../../../my/vedio_monitor_model/WORKFLOW.md", __DIR__)
+    ]
+
+    previous_github_token = System.get_env("GITHUB_TOKEN")
+    System.put_env("GITHUB_TOKEN", "test-github-token")
+
+    on_exit(fn ->
+      if previous_github_token do
+        System.put_env("GITHUB_TOKEN", previous_github_token)
+      else
+        System.delete_env("GITHUB_TOKEN")
+      end
+    end)
+
+    Enum.each(paths, fn path ->
+      assert {:ok, %{config: config}} = Workflow.load(path)
+      assert {:ok, settings} = Schema.parse(config)
+
+      assert {:ok, policy} =
+               Schema.resolve_runtime_turn_sandbox_policy(settings, System.tmp_dir!())
+
+      assert policy["type"] == "workspaceWrite"
+      assert policy["networkAccess"]
+      assert policy["writableRoots"] != []
+    end)
   end
 end

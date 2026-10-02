@@ -1423,6 +1423,21 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              workspace: %Schema.Workspace{root: "/tmp/ignored"}
            }) == explicit_policy
 
+    assert Schema.resolve_turn_sandbox_policy(
+             %Schema{
+               codex: %Codex{turn_sandbox_policy: %{"type" => "workspaceWrite", "networkAccess" => true}},
+               workspace: %Schema.Workspace{root: "/tmp/ignored"}
+             },
+             "/tmp/current-issue"
+           ) == %{
+             "type" => "workspaceWrite",
+             "writableRoots" => [Path.expand("/tmp/current-issue")],
+             "readOnlyAccess" => %{"type" => "fullAccess"},
+             "networkAccess" => true,
+             "excludeTmpdirEnvVar" => false,
+             "excludeSlashTmp" => false
+           }
+
     assert Schema.resolve_turn_sandbox_policy(%Schema{
              codex: %Codex{turn_sandbox_policy: nil},
              workspace: %Schema.Workspace{root: ""}
@@ -1482,7 +1497,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
            }
   end
 
-  test "runtime sandbox policy resolution passes explicit policies through unchanged" do
+  test "runtime sandbox policy resolution supplies issue roots for partial workspace-write policies" do
     test_root =
       Path.join(
         System.tmp_dir!(),
@@ -1509,6 +1524,28 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
                "type" => "workspaceWrite",
                "writableRoots" => ["relative/path"],
                "networkAccess" => true
+             }
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        codex_turn_sandbox_policy: %{
+          type: "workspaceWrite",
+          networkAccess: true
+        }
+      )
+
+      assert {:ok, runtime_settings} = Config.codex_runtime_settings(issue_workspace)
+
+      assert {:ok, canonical_issue_workspace} =
+               SymphonyElixir.PathSafety.canonicalize(issue_workspace)
+
+      assert runtime_settings.turn_sandbox_policy == %{
+               "type" => "workspaceWrite",
+               "writableRoots" => [canonical_issue_workspace],
+               "readOnlyAccess" => %{"type" => "fullAccess"},
+               "networkAccess" => true,
+               "excludeTmpdirEnvVar" => false,
+               "excludeSlashTmp" => false
              }
 
       write_workflow_file!(Workflow.workflow_file_path(),

@@ -328,7 +328,15 @@ defmodule SymphonyElixir.Config.Schema do
   def resolve_turn_sandbox_policy(settings, workspace \\ nil) do
     case settings.codex.turn_sandbox_policy do
       %{} = policy ->
-        policy
+        if needs_workspace_root?(policy) do
+          workspace
+          |> default_workspace_root(settings.workspace.root)
+          |> expand_local_workspace_root()
+          |> default_turn_sandbox_policy()
+          |> Map.merge(policy)
+        else
+          policy
+        end
 
       _ ->
         workspace
@@ -343,7 +351,7 @@ defmodule SymphonyElixir.Config.Schema do
   def resolve_runtime_turn_sandbox_policy(settings, workspace \\ nil, opts \\ []) do
     case settings.codex.turn_sandbox_policy do
       %{} = policy ->
-        {:ok, policy}
+        merge_partial_policy(policy, settings.workspace.root, workspace, opts)
 
       _ ->
         workspace
@@ -584,6 +592,31 @@ defmodule SymphonyElixir.Config.Schema do
       "excludeSlashTmp" => false
     }
   end
+
+  # Project workflows can safely set policy options such as networkAccess, while
+  # Symphony supplies the per-issue workspace path at runtime.
+  defp needs_workspace_root?(%{"type" => "workspaceWrite"} = policy) do
+    not Map.has_key?(policy, "writableRoots")
+  end
+
+  defp needs_workspace_root?(_policy), do: false
+
+  defp merge_partial_policy(policy, configured_root, workspace, opts) do
+    if needs_workspace_root?(policy) do
+      workspace
+      |> default_workspace_root(configured_root)
+      |> default_runtime_turn_sandbox_policy(opts)
+      |> merge_with_policy(policy)
+    else
+      {:ok, policy}
+    end
+  end
+
+  defp merge_with_policy({:ok, default_policy}, policy) do
+    {:ok, Map.merge(default_policy, policy)}
+  end
+
+  defp merge_with_policy(error, _policy), do: error
 
   defp default_runtime_turn_sandbox_policy(workspace_root, opts) when is_binary(workspace_root) do
     if Keyword.get(opts, :remote, false) do
