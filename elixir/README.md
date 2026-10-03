@@ -274,8 +274,9 @@ codex:
 - Reads and identity: polling is scoped to the configured repository; `issue.id` is the
   repository issue number, `issue.identifier` is `GH-<number>`, hidden or deleted `404` issues are
   omitted on refresh, and pull requests returned by the Issues API are not dispatchable.
-- Tool and auth: `github_api` accepts a relative REST `path` plus optional `params` and JSON
-  `body`; Symphony executes it host-side with the session-bound token, removes configured tracker
+- Tool and auth: `github_api` accepts a relative REST `path` plus optional `params` and a JSON
+  object or array `body` (or `null`); scalar bodies are rejected before a request is sent.
+  Symphony executes it host-side with the session-bound token, removes configured tracker
   credentials and provider authentication aliases from the Codex child, and leaves raw tool access
   limited by that token's GitHub permissions.
 

@@ -53,6 +53,17 @@ defmodule SymphonyElixir.GitHub.Client do
   end
 
   @doc false
+  @spec request_for_test(String.t(), String.t(), map(), term(), map(), keyword()) ::
+          {:ok, %{status: integer(), body: term()}} | {:error, term()}
+  def request_for_test(method, path, params, body, tracker_settings, req_options)
+      when is_binary(method) and is_binary(path) and is_map(params) and is_map(tracker_settings) and
+             is_list(req_options) do
+    with {:ok, github_settings} <- settings(tracker_settings) do
+      perform_request(method, path, params, body, github_settings, Keyword.take(req_options, [:plug]))
+    end
+  end
+
+  @doc false
   @spec normalize_issue_for_test(map(), String.t()) :: Issue.t() | nil
   def normalize_issue_for_test(issue, repo) when is_map(issue) and is_binary(repo) do
     normalize_issue(issue, repo)
@@ -264,14 +275,20 @@ defmodule SymphonyElixir.GitHub.Client do
   end
 
   defp perform_request(method, path, params, body, settings) do
+    perform_request(method, path, params, body, settings, [])
+  end
+
+  defp perform_request(method, path, params, body, settings, req_options) do
     with {:ok, request_method} <- request_method(method) do
-      request_opts = [
-        method: request_method,
-        url: settings.api_url <> path,
-        headers: github_headers(settings.token),
-        params: params,
-        connect_options: [timeout: 30_000]
-      ]
+      request_opts =
+        [
+          method: request_method,
+          url: settings.api_url <> path,
+          headers: github_headers(settings.token),
+          params: params,
+          connect_options: [timeout: 30_000]
+        ]
+        |> Keyword.merge(req_options)
 
       request_opts = if is_nil(body), do: request_opts, else: Keyword.put(request_opts, :json, body)
 
