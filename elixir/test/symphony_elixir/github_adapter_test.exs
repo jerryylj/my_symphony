@@ -301,6 +301,122 @@ defmodule SymphonyElixir.GitHub.AdapterTest do
     )
   end
 
+  test "github_api rejects scalar JSON bodies before issuing a request" do
+    Enum.each(["{\"labels\":[\"agent-ready\"]}", 42, true], fn body ->
+      response =
+        GitHubAgentTool.execute(
+          "github_api",
+          %{
+            "method" => "POST",
+            "path" => "/repos/octo/repo/issues/42/labels",
+            "body" => body
+          },
+          github_client: fn _method, _path, _params, _body, _opts ->
+            flunk("scalar JSON bodies must not reach the GitHub client")
+          end
+        )
+
+      assert response["success"] == false
+
+      assert Jason.decode!(response["output"]) == %{
+               "error" => %{
+                 "message" => "`github_api.body` must be a JSON object, array, or null."
+               }
+             }
+    end)
+  end
+
+  test "github_api accepts a null body without sending JSON" do
+    test_pid = self()
+
+    response =
+      GitHubAgentTool.execute(
+        "github_api",
+        %{
+          "method" => "PATCH",
+          "path" => "/repos/octo/repo/issues/42",
+          "body" => nil
+        },
+        tracker_settings: tracker_settings(),
+        github_client: fn method, path, params, body, client_opts ->
+          GitHubClient.request_for_test(
+            method,
+            path,
+            params,
+            body,
+            Keyword.fetch!(client_opts, :tracker_settings),
+            plug: fn conn ->
+              send(
+                test_pid,
+                {:github_wire_request, conn.method, conn.request_path, Plug.Conn.get_req_header(conn, "content-type"), Req.Test.raw_body(conn)}
+              )
+
+              conn
+              |> Plug.Conn.put_resp_content_type("application/json")
+              |> Plug.Conn.send_resp(200, "{}")
+            end
+          )
+        end
+      )
+
+    assert response["success"]
+    assert_receive {:github_wire_request, "PATCH", "/repos/octo/repo/issues/42", [], ""}
+  end
+
+  test "github_api sends GitHub mutation bodies as their original JSON values" do
+    test_pid = self()
+    tracker_settings = tracker_settings()
+
+    mutations = [
+      {"POST", "/repos/octo/repo/issues/42/comments", %{"body" => "handoff completed"}},
+      {"POST", "/repos/octo/repo/issues/42/labels", ["agent-ready"]},
+      {"PATCH", "/repos/octo/repo/issues/42", %{"state" => "closed"}}
+    ]
+
+    Enum.each(mutations, fn {method, path, request_body} ->
+      response =
+        GitHubAgentTool.execute(
+          "github_api",
+          %{
+            "method" => method,
+            "path" => path,
+            "body" => request_body
+          },
+          tracker_settings: tracker_settings,
+          github_client: fn method, client_path, params, body, client_opts ->
+            GitHubClient.request_for_test(
+              method,
+              client_path,
+              params,
+              body,
+              Keyword.fetch!(client_opts, :tracker_settings),
+              plug: fn conn ->
+                send(
+                  test_pid,
+                  {:github_wire_request, conn.method, conn.request_path, Plug.Conn.get_req_header(conn, "content-type"), Req.Test.raw_body(conn)}
+                )
+
+                conn
+                |> Plug.Conn.put_resp_content_type("application/json")
+                |> Plug.Conn.send_resp(200, "{}")
+              end
+            )
+          end
+        )
+
+      assert response["success"]
+      assert_receive {:github_wire_request, ^method, ^path, ["application/json"], raw_body}
+      assert Jason.decode!(raw_body) == request_body
+      refute is_binary(Jason.decode!(raw_body))
+    end)
+
+    assert get_in(GitHubAgentTool.tool_specs(), [Access.at(0), "inputSchema", "properties", "body", "type"]) == [
+             "object",
+             "array",
+             "null"
+           ]
+  end
+
   test "github_api reports unsupported tools, malformed calls, and client failures" do
     unsupported = GitHubAgentTool.execute("not_github_api", %{}, [])
     assert unsupported["success"] == false

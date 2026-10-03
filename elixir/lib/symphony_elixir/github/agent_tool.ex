@@ -30,6 +30,7 @@ defmodule SymphonyElixir.GitHub.AgentTool do
         "additionalProperties" => true
       },
       "body" => %{
+        "type" => ["object", "array", "null"],
         "description" => "Optional JSON request body."
       }
     }
@@ -72,8 +73,9 @@ defmodule SymphonyElixir.GitHub.AgentTool do
   defp normalize_arguments(arguments) when is_map(arguments) do
     with {:ok, method} <- normalize_method(Map.get(arguments, "method")),
          {:ok, path} <- normalize_path(Map.get(arguments, "path")),
-         {:ok, params} <- normalize_params(Map.get(arguments, "params")) do
-      {:ok, method, path, params, Map.get(arguments, "body")}
+         {:ok, params} <- normalize_params(Map.get(arguments, "params")),
+         {:ok, body} <- normalize_body(Map.get(arguments, "body")) do
+      {:ok, method, path, params, body}
     end
   end
 
@@ -101,6 +103,10 @@ defmodule SymphonyElixir.GitHub.AgentTool do
   defp normalize_params(nil), do: {:ok, %{}}
   defp normalize_params(params) when is_map(params), do: {:ok, params}
   defp normalize_params(_params), do: {:error, :invalid_params}
+
+  defp normalize_body(nil), do: {:ok, nil}
+  defp normalize_body(body) when is_map(body) or is_list(body), do: {:ok, body}
+  defp normalize_body(_body), do: {:error, :invalid_body}
 
   defp rest_response(status, body) do
     dynamic_tool_response(status in 200..299, encode_payload(%{"status" => status, "body" => body}))
@@ -146,6 +152,10 @@ defmodule SymphonyElixir.GitHub.AgentTool do
 
   defp tool_error_payload(:invalid_params) do
     %{"error" => %{"message" => "`github_api.params` must be a JSON object when provided."}}
+  end
+
+  defp tool_error_payload(:invalid_body) do
+    %{"error" => %{"message" => "`github_api.body` must be a JSON object, array, or null."}}
   end
 
   defp tool_error_payload(:missing_github_token) do
