@@ -108,16 +108,24 @@ Verify that real PR through `github_api`:
 
 After a valid merge, advance by exactly one GitHub number:
 
+`ready-for-agent` is Matt's triage label: the issue is specified and suitable for agent work.
+`agent-ready` is Symphony's dispatch label: an issue must have it to be picked up by this
+workflow. The labels may coexist, but `ready-for-agent` never substitutes for `agent-ready`.
+Compare their complete names, not their similar meanings.
+
 1. Compute `successor_number = current_number + 1`.
 2. `GET /repos/<repository>/issues/{successor_number}`.
 3. If the successor is absent, closed, or contains a `pull_request` object, close the current issue
    and end the sequence successfully. Do not skip it or select another issue.
-4. If the successor is an open issue, inspect its labels. Add `agent-ready` only if that label is
-   missing. Retry transient GitHub failures and confirm the label is present before any other
-   handoff action.
-5. Only after confirming that the immediate successor has `agent-ready`, close the current issue.
-   If a process was interrupted after successor enablement, recovery must add the missing label
-   first, then close the current issue once.
+4. If the successor is an open issue, report its actual label names and whether the exact
+   `agent-ready` label is present. Having only `ready-for-agent` means `agent-ready` is missing.
+   If missing, add `agent-ready` with `POST /repos/<repository>/issues/{successor_number}/labels`,
+   then `GET /repos/<repository>/issues/{successor_number}` again and confirm the exact label is
+   present. Retry transient GitHub failures. If adding or confirming fails, record the blocker on
+   the current issue, leave it open, and stop.
+5. Report the confirmed successor label result. Only after confirming that the immediate successor
+   has `agent-ready`, close the current issue. If a process was interrupted after successor
+   enablement, recovery must add the missing label first, then close the current issue once.
 6. If there is no valid successor, close the current issue after the merge verification and stop
    successfully.
 

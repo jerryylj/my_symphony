@@ -63,7 +63,12 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
     assert prompt =~ "Refs #<current_number>"
     refute prompt =~ "Closes #<current_number>"
     assert prompt =~ "successor_number = current_number + 1"
-    assert prompt =~ "Only after confirming that the immediate successor has `agent-ready`, close the current issue"
+    assert prompt =~ "`ready-for-agent` is Matt's triage label"
+    assert prompt =~ "`agent-ready` is Symphony's dispatch label"
+    assert prompt =~ "`ready-for-agent` never substitutes for `agent-ready`"
+    assert prompt =~ "Having only `ready-for-agent` means `agent-ready` is missing"
+    assert prompt =~ "then `GET /repos/<repository>/issues/{successor_number}` again"
+    assert prompt =~ "Only after confirming that the immediate successor"
     assert prompt =~ "Never label a successor while the current issue is unmerged"
   end
 
@@ -93,6 +98,7 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
 
     assert prompt =~ "value from the `origin`"
     refute prompt =~ "jerryylj/stock_manage"
+    assert prompt =~ "Having only `ready-for-agent` means `agent-ready` is missing"
   end
 
   test "GitHub target workflows supply each issue workspace with network access" do
