@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.symphony.stock-manage</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/yd/Library/Application Support/Symphony/runtime/my/stock_manage/start-service.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/yd/Library/Application Support/Symphony/runtime</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/yd</string>
+    <key>SYMPHONY_PORT</key>
+    <string>4102</string>
+    <key>SYMPHONY_GITHUB_TOKEN_FILE</key>
+    <string>/Users/yd/Library/Application Support/Symphony/secrets/GITHUB_TOKEN</string>
+    <key>SYMPHONY_MODEL_ENV_FILE</key>
+    <string>/Users/yd/Library/Application Support/Symphony/secrets/environment</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/yd/Library/Logs/Symphony/stock-manage.launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/yd/Library/Logs/Symphony/stock-manage.launchd.error.log</string>
+</dict>
+</plist>

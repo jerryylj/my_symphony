@@ -3,8 +3,17 @@ include:
   - ../workflow-libraries/github-serial.yml
 prompt_file: ../workflow-libraries/github-serial.md
 tracker:
+  kind: github
   provider:
     repo: jerryylj/stock_manage
+  required_labels:
+    - agent-ready
+  active_states:
+    - open
+  terminal_states:
+    - closed
+polling:
+  interval_ms: 5000
 workspace:
   root: /Volumes/cold_storage/symphony_worksapce/stock-manage
 hooks:
