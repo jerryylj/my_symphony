@@ -6,7 +6,7 @@ tracker:
   provider:
     repo: jerryylj/stock_manage
 workspace:
-  root: ~/code/stock-manage-symphony-workspaces
+  root: /Volumes/cold_storage/symphony_worksapce/stock-manage
 hooks:
   after_create: |
     GIT_CONFIG_COUNT=1 \

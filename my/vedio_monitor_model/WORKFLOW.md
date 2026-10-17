@@ -6,7 +6,7 @@ tracker:
   provider:
     repo: jerryylj/vedio_monitor_model
 workspace:
-  root: ~/code/vedio-monitor-model-symphony-workspaces
+  root: /Volumes/cold_storage/symphony_worksapce/vedio-monitor-model
 hooks:
   after_create: |
     GIT_CONFIG_COUNT=1 \
