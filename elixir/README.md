@@ -157,19 +157,27 @@ Notes:
   case and surrounding whitespace. A blank configured label matches no issue.
 - `tracker.completion_policy: merged_pr` is an optional GitHub-only policy. It gives the agent
   `github_complete_issue` and `github_push_branch` tools. The agent may read GitHub data, comment on
-  its current issue, and create/update/merge PRs through `github_api`, but raw issue state and
+  its current issue, create PRs, and update/merge PRs cross-referenced from that issue through `github_api`, but raw issue state and
   successor label writes are denied. Symphony verifies the merged PR, labels the immediate
-  successor, and closes the current issue. A missing or open PR leaves the issue active; the
+  successor, and closes the current issue. Dispatch waits until the predecessor is closed, so a
+  failed close cannot start the successor. A missing or open PR leaves the issue active; the
   configured max-turn policy can pause a genuinely stalled run.
 - A `merged_pr` workflow must use `workspace-write` with a `workspaceWrite` turn policy and
   `networkAccess: false`; remote SSH workers are unsupported. Symphony does not auto-approve
   command escalation requests for these sessions. The host-side push tool validates the current
-  feature branch and origin before pushing.
+  feature branch and origin, then exports that branch through a Git bundle and pushes from an
+  isolated temporary repository to the configured GitHub repository. It never executes a push
+  from the agent-writable workspace.
 - Before enabling `merged_pr` for a repository, disable GitHub's **Auto-close issues with merged
   linked pull requests** setting under repository Settings → General → Issues. Merge a disposable
-  linked PR and confirm the issue remains open until `github_complete_issue` runs. Symphony does
-  not verify this repository setting automatically. A GitHub close without a
-  Symphony completion marker is logged as a policy violation.
+  linked PR and confirm the issue remains open until `github_complete_issue` runs. Then set
+  `SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED` to the exact `tracker.provider.repo` value. Symphony
+  refuses to start a `merged_pr` workflow without that assertion. GitHub does not expose the
+  setting through the repository API, so the operator must perform the smoke test. Symphony writes
+  a close intent before closing and a receipt afterward. If receipt writing fails, terminal audit
+  verifies the intent, closing actor, and merged PR, then retries the receipt. A close without a
+  matching intent and actor is logged as a policy violation. Use a dedicated Symphony GitHub
+  identity so manual closures cannot be mistaken for Symphony's own action.
 - Safer Codex defaults are used when policy fields are omitted:
   - `codex.approval_policy` defaults to `{"reject":{"sandbox_approval":true,"rules":true,"mcp_elicitations":true}}`
   - `codex.thread_sandbox` defaults to `workspace-write`
@@ -295,7 +303,7 @@ codex:
   credentials and provider authentication aliases from the Codex child, and leaves raw tool access
   limited by that token's GitHub permissions.
 - In `merged_pr` mode, `github_api` allows GET requests, current-issue comments, and PR
-  create/update/merge requests. The Codex shell cannot reach GitHub, so use `github_push_branch`
+  create requests and update/merge requests for PRs already cross-referenced from the current issue. The Codex shell cannot reach GitHub, so use `github_push_branch`
   instead of `git push`; use `github_complete_issue` after the PR merge. Its outcomes include
   `no_pr`, `open_pr`, `wrong_base`, `unrelated_pr`, `ambiguous_pr`, `external_blocker`, and
   `completed`. The completion marker allows interrupted handoffs to resume without repeating

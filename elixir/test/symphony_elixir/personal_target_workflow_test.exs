@@ -77,6 +77,7 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
   test "stock manage target workflow preserves its bounded turn policy" do
     path = Path.expand("../../../my/stock_manage/WORKFLOW.md", __DIR__)
     previous_github_token = System.get_env("GITHUB_TOKEN")
+    previous_smoke_verification = System.get_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED")
 
     on_exit(fn ->
       if previous_github_token do
@@ -84,11 +85,20 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
       else
         System.delete_env("GITHUB_TOKEN")
       end
+
+      if previous_smoke_verification do
+        System.put_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED", previous_smoke_verification)
+      else
+        System.delete_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED")
+      end
     end)
 
     assert {:ok, %{config: config, prompt: prompt, source_paths: source_paths}} = Workflow.load(path)
     System.put_env("GITHUB_TOKEN", "test-github-token")
     assert {:ok, settings} = Schema.parse(config)
+    System.delete_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED")
+    assert {:error, :github_auto_close_smoke_not_verified} = Config.validate_settings(settings)
+    System.put_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED", "kunkun-code-org/stock_manage")
     assert :ok = Config.validate_settings(settings)
 
     assert settings.tracker.provider["repo"] == "kunkun-code-org/stock_manage"

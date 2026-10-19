@@ -392,6 +392,12 @@ Fields:
   - An issue MUST contain every configured label to dispatch or continue.
   - Matching ignores case and surrounding whitespace.
   - A blank configured label matches no issue.
+- `completion_policy` (string)
+  - Optional. `merged_pr` enables the GitHub-only host completion gate described in §11.5.
+  - Before startup, the operator MUST disable GitHub automatic closing of linked issues, merge a
+    disposable linked PR to verify the issue stays open, and set
+    `SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED` to the exact configured `provider.repo`.
+    Without this repository-bound assertion, configuration validation fails.
 - `active_states` (list of strings)
   - REQUIRED unless the selected adapter profile documents a default.
   - Values are provider-native state names compared case-insensitively by the scheduler.
@@ -1326,12 +1332,17 @@ merged-PR completion policy has one host-side tracker write operation at the ada
 - For GitHub workflows with `tracker.completion_policy: merged_pr`, the coding agent can request
   completion but cannot directly mutate issue state or successor dispatch labels. Symphony verifies
   a cross-referenced PR merged into the repository default branch, labels only the immediate
-  successor, records a durable completion marker, and closes the current issue. Missing/open PRs
-  leave the issue active; real external blockers can pause it under the workflow's turn policy.
+  successor, records a durable close intent, and closes the current issue. Dispatch of that
+  successor waits for the predecessor to be closed, even when its label was added earlier. A
+  post-close receipt is retried when available; a restart can recover from a missing receipt by
+  verifying the intent, close actor, and merged PR. Missing/open PRs leave the issue active;
+  real external blockers can pause it under the workflow's turn policy.
 - These workflows deny agent-shell network access and expose host-side branch push and PR REST
-  operations. The repository must disable GitHub's automatic closing of linked issues before the
-  policy is activated. A closed issue without Symphony's completion marker is reported as a
-  policy violation.
+  operations. Branch push uses an isolated temporary repository and a fixed configured target,
+  avoiding agent-controlled Git push configuration and hooks. The repository must disable GitHub's
+  automatic closing of linked issues before activation. Configuration requires a repository-bound
+  smoke-test assertion. A closed
+  issue without a matching Symphony close intent and close actor is reported as a policy violation.
 - For other workflows, the service remains a scheduler/runner and tracker reader.
 - Workflow-specific success often means "reached the next handoff state" (for example
   `Human Review`) rather than tracker terminal state `Done`.

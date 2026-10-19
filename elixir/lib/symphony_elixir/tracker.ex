@@ -9,6 +9,7 @@ defmodule SymphonyElixir.Tracker do
 
   alias SymphonyElixir.Config
   alias SymphonyElixir.Tracker.Issue
+  require Logger
 
   @adapters %{
     "asana" => SymphonyElixir.Asana.Adapter,
@@ -51,6 +52,18 @@ defmodule SymphonyElixir.Tracker do
       selected_adapter.audit_terminal_issue(issue, settings)
     else
       :ok
+    end
+  end
+
+  @spec report_terminal_issue(Issue.t()) :: :ok | {:error, term()}
+  def report_terminal_issue(%Issue{} = issue) do
+    case audit_terminal_issue(issue) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("GitHub completion policy violation issue=#{issue.identifier} reason=#{inspect(reason)}")
+        {:error, reason}
     end
   end
 

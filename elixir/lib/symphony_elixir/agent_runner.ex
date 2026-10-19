@@ -206,8 +206,7 @@ defmodule SymphonyElixir.AgentRunner do
         if active_issue_state?(refreshed_issue.state) and issue_routable?(refreshed_issue) do
           {:continue, refreshed_issue}
         else
-          audit_if_terminal(refreshed_issue)
-          {:done, refreshed_issue}
+          terminal_continuation(refreshed_issue)
         end
 
       {:ok, []} ->
@@ -220,6 +219,13 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp continue_with_issue?(issue, _issue_state_fetcher), do: {:done, issue}
 
+  defp terminal_continuation(issue) do
+    case audit_if_terminal(issue) do
+      :ok -> {:done, issue}
+      {:error, reason} -> {:error, {:terminal_audit_failed, reason}}
+    end
+  end
+
   defp audit_if_terminal(%Issue{} = issue) do
     terminal? =
       Enum.any?(Config.settings!().tracker.terminal_states, fn state ->
@@ -227,10 +233,9 @@ defmodule SymphonyElixir.AgentRunner do
       end)
 
     if terminal? do
-      case Tracker.audit_terminal_issue(issue) do
-        :ok -> :ok
-        {:error, reason} -> Logger.error("GitHub completion policy violation issue=#{issue.identifier} reason=#{inspect(reason)}")
-      end
+      Tracker.report_terminal_issue(issue)
+    else
+      :ok
     end
   end
 

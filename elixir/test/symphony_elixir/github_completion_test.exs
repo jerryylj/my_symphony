@@ -49,6 +49,23 @@ defmodule SymphonyElixir.GitHub.CompletionTest do
     refute_received {:request, "POST", _, _}
   end
 
+  test "GitHub rate limiting is retryable while a permission denial is a blocker" do
+    for {message, outcome} <- [{"API rate limit exceeded", "transient_error"}, {"Resource not accessible by integration", "external_blocker"}] do
+      response =
+        AgentTool.execute("github_complete_issue", %{},
+          completion_policy: "merged_pr",
+          tracker_settings: @settings,
+          issue: @issue,
+          github_client: fn "GET", "/repos/octo/repo/issues/42", _, _, _ ->
+            {:ok, %{status: 403, body: %{"message" => message}}}
+          end
+        )
+
+      refute response["success"]
+      assert %{"outcome" => ^outcome} = Jason.decode!(response["output"])
+    end
+  end
+
   test "a merged associated PR releases exactly the next issue before closing current" do
     responses = %{
       "/repos/octo/repo/issues/42" => %{"state" => "open", "number" => 42},
@@ -63,8 +80,8 @@ defmodule SymphonyElixir.GitHub.CompletionTest do
     assert response["success"]
     assert %{"outcome" => "completed", "pr_number" => 57} = Jason.decode!(response["output"])
     assert_received {:request, "GET", "/repos/octo/repo/issues/43", nil}
-    assert_received {:request, "POST", "/repos/octo/repo/issues/42/comments", %{"body" => "<!-- symphony-completion:pr=57 -->"}}
     assert_received {:request, "PATCH", "/repos/octo/repo/issues/42", %{"state" => "closed"}}
+    assert_received {:request, "POST", "/repos/octo/repo/issues/42/comments", %{"body" => "<!-- symphony-completion:pr=57 -->"}}
     refute_received {:request, _, "/repos/octo/repo/issues/44", _}
   end
 
@@ -180,8 +197,12 @@ defmodule SymphonyElixir.GitHub.CompletionTest do
     refute_received {:request, "PATCH", "/repos/octo/repo/issues/42", _}
   end
 
-  test "handoff adds only the immediate successor label, then closes; retry does not duplicate it" do
-    {:ok, state} = Agent.start_link(fn -> %{current: "open", successor_labels: [], marker: false, requests: []} end)
+  test "a lost close receipt recovers after restart without repeating the close or handoff" do
+    {:ok, state} =
+      Agent.start(fn ->
+        %{current: "open", successor_labels: [], marker: false, intent: false, fail_receipt: true, requests: []}
+      end)
+
     on_exit(fn -> if Process.alive?(state), do: Agent.stop(state) end)
     test_pid = self()
 
@@ -193,38 +214,124 @@ defmodule SymphonyElixir.GitHub.CompletionTest do
 
         result =
           case {method, path} do
-            {"GET", "/repos/octo/repo/issues/42"} -> %{"state" => updated.current, "number" => 42}
-            {"GET", "/repos/octo/repo/issues/42/timeline"} -> [cross_reference(57)]
-            {"GET", "/repos/octo/repo"} -> %{"default_branch" => "main"}
-            {"GET", "/repos/octo/repo/pulls/57"} -> pr(57, "closed", true)
-            {"GET", "/repos/octo/repo/issues/43"} -> %{"state" => "open", "number" => 43, "labels" => updated.successor_labels}
-            {"POST", "/repos/octo/repo/issues/43/labels"} -> []
-            {"GET", "/repos/octo/repo/issues/42/comments"} -> if(updated.marker, do: [%{"body" => "<!-- symphony-completion:pr=57 -->"}], else: [])
-            {"POST", "/repos/octo/repo/issues/42/comments"} -> %{}
-            {"PATCH", "/repos/octo/repo/issues/42"} -> %{"state" => "closed"}
+            {"GET", "/repos/octo/repo/issues/42"} ->
+              issue_response(updated.current)
+
+            {"GET", "/repos/octo/repo/issues/42/timeline"} ->
+              [cross_reference(57)]
+
+            {"GET", "/repos/octo/repo"} ->
+              %{"default_branch" => "main"}
+
+            {"GET", "/repos/octo/repo/pulls/57"} ->
+              pr(57, "closed", true)
+
+            {"GET", "/repos/octo/repo/issues/43"} ->
+              %{"state" => "open", "number" => 43, "labels" => updated.successor_labels}
+
+            {"POST", "/repos/octo/repo/issues/43/labels"} ->
+              []
+
+            {"GET", "/repos/octo/repo/issues/42/comments"} ->
+              if(updated.intent, do: [valid_intent()], else: []) ++ if updated.marker, do: [valid_marker()], else: []
+
+            {"POST", "/repos/octo/repo/issues/42/comments"} ->
+              %{}
+
+            {"PATCH", "/repos/octo/repo/issues/42"} ->
+              issue_response("closed")
           end
+
+        failed_receipt? =
+          method == "POST" and path == "/repos/octo/repo/issues/42/comments" and
+            body["body"] == "<!-- symphony-completion:pr=57 -->" and updated.fail_receipt
 
         changed =
           case {method, path} do
-            {"POST", "/repos/octo/repo/issues/43/labels"} -> %{updated | successor_labels: [%{"name" => "agent-ready"}]}
-            {"POST", "/repos/octo/repo/issues/42/comments"} -> %{updated | marker: true}
-            {"PATCH", "/repos/octo/repo/issues/42"} -> %{updated | current: "closed"}
-            _ -> updated
+            {"POST", "/repos/octo/repo/issues/43/labels"} ->
+              %{updated | successor_labels: [%{"name" => "agent-ready"}]}
+
+            {"POST", "/repos/octo/repo/issues/42/comments"} ->
+              cond do
+                body["body"] == "<!-- symphony-close-intent:pr=57 -->" -> %{updated | intent: true}
+                failed_receipt? -> %{updated | fail_receipt: false}
+                true -> %{updated | marker: true}
+              end
+
+            {"PATCH", "/repos/octo/repo/issues/42"} ->
+              %{updated | current: "closed"}
+
+            _ ->
+              updated
           end
 
-        {{:ok, %{status: 200, body: result}}, changed}
+        response = if failed_receipt?, do: {:error, :timeout}, else: {:ok, %{status: 200, body: result}}
+        {response, changed}
       end)
     end
 
     opts = [completion_policy: "merged_pr", tracker_settings: @settings, issue: @issue, github_client: client]
     assert AgentTool.execute("github_complete_issue", %{"pr_number" => 57}, opts)["success"]
+    refute Agent.get(state, & &1.marker)
+    assert :ok = Completion.audit_closed(@issue, @settings, client)
+    assert Agent.get(state, & &1.marker)
     assert AgentTool.execute("github_complete_issue", %{"pr_number" => 57}, opts)["success"]
 
     requests = Agent.get(state, & &1.requests)
+
+    assert Enum.find_index(requests, &(&1 == {"POST", "/repos/octo/repo/issues/42/comments"})) <
+             Enum.find_index(requests, &(&1 == {"PATCH", "/repos/octo/repo/issues/42"}))
+
     assert Enum.count(requests, &(&1 == {"POST", "/repos/octo/repo/issues/43/labels"})) == 1
-    assert Enum.count(requests, &(&1 == {"POST", "/repos/octo/repo/issues/42/comments"})) == 1
+    assert Enum.count(requests, &(&1 == {"POST", "/repos/octo/repo/issues/42/comments"})) == 3
     assert Enum.count(requests, &(&1 == {"PATCH", "/repos/octo/repo/issues/42"})) == 1
     refute Enum.any?(requests, fn {_method, path} -> String.contains?(path, "/issues/44") end)
+  end
+
+  test "a timed-out close response recovers from GitHub's confirmed closed state" do
+    {:ok, state} = Agent.start(fn -> %{closed: false, comments: [], close_calls: 0} end)
+    on_exit(fn -> if Process.alive?(state), do: Agent.stop(state) end)
+
+    client = fn method, path, _params, body, _opts ->
+      case {method, path} do
+        {"GET", "/repos/octo/repo/issues/42"} ->
+          issue_state = if Agent.get(state, & &1.closed), do: "closed", else: "open"
+          response(issue_response(issue_state))
+
+        {"GET", "/repos/octo/repo/issues/42/timeline"} ->
+          response([cross_reference(57)])
+
+        {"GET", "/repos/octo/repo"} ->
+          response(%{"default_branch" => "main"})
+
+        {"GET", "/repos/octo/repo/pulls/57"} ->
+          response(pr(57, "closed", true))
+
+        {"GET", "/repos/octo/repo/issues/43"} ->
+          {:ok, %{status: 404, body: %{}}}
+
+        {"GET", "/repos/octo/repo/issues/42/comments"} ->
+          response(Agent.get(state, & &1.comments))
+
+        {"POST", "/repos/octo/repo/issues/42/comments"} ->
+          comment = if body["body"] == "<!-- symphony-close-intent:pr=57 -->", do: valid_intent(), else: valid_marker()
+          Agent.update(state, &%{&1 | comments: [comment | &1.comments]})
+          response(comment)
+
+        {"PATCH", "/repos/octo/repo/issues/42"} ->
+          Agent.update(state, &%{&1 | closed: true, close_calls: &1.close_calls + 1})
+          {:error, :timeout}
+      end
+    end
+
+    opts = [completion_policy: "merged_pr", tracker_settings: @settings, issue: @issue, github_client: client]
+    first = AgentTool.execute("github_complete_issue", %{"pr_number" => 57}, opts)
+    refute first["success"]
+    assert %{"outcome" => "transient_error"} = Jason.decode!(first["output"])
+
+    assert :ok = Completion.audit_closed(@issue, @settings, client)
+    assert Agent.get(state, & &1.close_calls) == 1
+    assert Agent.get(state, &Enum.any?(&1.comments, fn comment -> comment["body"] == valid_marker()["body"] end))
   end
 
   test "raw issue and label writes are refused under merged-PR policy" do
@@ -243,6 +350,15 @@ defmodule SymphonyElixir.GitHub.CompletionTest do
 
       refute response["success"]
     end
+
+    missing_binding =
+      AgentTool.execute("github_api", %{"method" => "POST", "path" => "/repos/octo/repo/pulls", "body" => %{}},
+        completion_policy: "merged_pr",
+        issue: @issue,
+        github_client: fn _, _, _, _, _ -> flunk("unbound PR write reached GitHub") end
+      )
+
+    refute missing_binding["success"]
   end
 
   test "PR publication and merge remain available through the bound GitHub tool" do
@@ -254,6 +370,7 @@ defmodule SymphonyElixir.GitHub.CompletionTest do
 
     for {method, path, body} <- [
           {"POST", "/repos/octo/repo/pulls", %{"title" => "Fix", "head" => "feature-42", "base" => "main"}},
+          {"PATCH", "/repos/octo/repo/pulls/57", %{"title" => "Updated"}},
           {"PUT", "/repos/octo/repo/pulls/57/merge", %{"merge_method" => "squash"}}
         ] do
       response =
@@ -261,29 +378,77 @@ defmodule SymphonyElixir.GitHub.CompletionTest do
           completion_policy: "merged_pr",
           tracker_settings: @settings,
           issue: @issue,
-          github_client: fn ^method, ^path, %{}, ^body, _opts ->
-            {:ok, %{status: 200, body: %{}}}
+          github_client: fn request_method, request_path, _params, request_body, _opts ->
+            case {request_method, request_path} do
+              {"GET", "/repos/octo/repo/issues/42/timeline"} ->
+                {:ok, %{status: 200, body: [cross_reference(57)]}}
+
+              {^method, ^path} ->
+                assert request_body == body
+                {:ok, %{status: 200, body: %{}}}
+            end
           end
         )
 
       assert response["success"]
     end
 
-    marker =
-      AgentTool.execute(
-        "github_api",
-        %{
-          "method" => "POST",
-          "path" => "/repos/octo/repo/issues/42/comments",
-          "body" => %{"body" => "<!-- symphony-completion:pr=57 -->"}
-        },
+    unrelated_merge =
+      AgentTool.execute("github_api", %{"method" => "PUT", "path" => "/repos/octo/repo/pulls/58/merge", "body" => %{}},
         completion_policy: "merged_pr",
         tracker_settings: @settings,
         issue: @issue,
-        github_client: fn _, _, _, _, _ -> flunk("agent cannot forge completion marker") end
+        github_client: fn
+          "GET", "/repos/octo/repo/issues/42/timeline", _, _, _ -> {:ok, %{status: 200, body: [cross_reference(57)]}}
+          _, _, _, _, _ -> flunk("unrelated PR merge reached GitHub")
+        end
       )
 
-    refute marker["success"]
+    refute unrelated_merge["success"]
+
+    for {method, path} <- [
+          {"PATCH", "/repos/octo/repo/pulls/0"},
+          {"PUT", "/repos/octo/repo/pulls/57/comments"},
+          {"PUT", "/repos/octo/repo/pulls/not-a-number/merge"}
+        ] do
+      denied =
+        AgentTool.execute("github_api", %{"method" => method, "path" => path, "body" => %{}},
+          completion_policy: "merged_pr",
+          tracker_settings: @settings,
+          issue: @issue,
+          github_client: fn _, _, _, _, _ -> flunk("invalid PR write reached GitHub") end
+        )
+
+      refute denied["success"]
+    end
+
+    timeout =
+      AgentTool.execute("github_api", %{"method" => "PUT", "path" => "/repos/octo/repo/pulls/57/merge", "body" => %{}},
+        completion_policy: "merged_pr",
+        tracker_settings: @settings,
+        issue: @issue,
+        github_client: fn "GET", "/repos/octo/repo/issues/42/timeline", _, _, _ -> {:error, :timeout} end
+      )
+
+    refute timeout["success"]
+
+    for body <- ["<!-- symphony-completion:pr=57 -->", "<!-- symphony-close-intent:pr=57 -->"] do
+      marker =
+        AgentTool.execute(
+          "github_api",
+          %{
+            "method" => "POST",
+            "path" => "/repos/octo/repo/issues/42/comments",
+            "body" => %{"body" => body}
+          },
+          completion_policy: "merged_pr",
+          tracker_settings: @settings,
+          issue: @issue,
+          github_client: fn _, _, _, _, _ -> flunk("agent cannot forge completion records") end
+        )
+
+      refute marker["success"]
+    end
 
     read =
       AgentTool.execute("github_api", %{"method" => "GET", "path" => "/repos/octo/repo/issues/42"},
@@ -301,21 +466,52 @@ defmodule SymphonyElixir.GitHub.CompletionTest do
   end
 
   test "terminal audit reports a close that lacks Symphony's completion marker" do
-    client = fn "GET", "/repos/octo/repo/issues/42/comments", _params, nil, _opts ->
-      {:ok, %{status: 200, body: [%{"body" => "local tests passed"}]}}
+    client = fn "GET", path, _params, nil, _opts ->
+      body = if String.ends_with?(path, "/comments"), do: [%{"body" => "local tests passed"}], else: issue_response("closed")
+      {:ok, %{status: 200, body: body}}
     end
 
     assert {:error, :out_of_band_closure} = Completion.audit_closed(@issue, @settings, client)
 
-    marked = fn "GET", "/repos/octo/repo/issues/42/comments", _params, nil, _opts ->
-      {:ok, %{status: 200, body: [%{"body" => "<!-- symphony-completion:pr=57 -->"}]}}
+    marked = fn "GET", path, _params, nil, _opts ->
+      body = if String.ends_with?(path, "/comments"), do: [valid_intent(), valid_marker()], else: issue_response("closed")
+      {:ok, %{status: 200, body: body}}
     end
 
     assert :ok = Completion.audit_closed(@issue, @settings, marked)
+
+    wrong_actor = fn "GET", path, _params, nil, _opts ->
+      body =
+        if String.ends_with?(path, "/comments") do
+          [%{valid_intent() | "user" => %{"id" => 8}}, valid_marker()]
+        else
+          issue_response("closed")
+        end
+
+      {:ok, %{status: 200, body: body}}
+    end
+
+    assert {:error, :out_of_band_closure} = Completion.audit_closed(@issue, @settings, wrong_actor)
+
+    early_marker = fn "GET", path, _params, nil, _opts ->
+      body =
+        if String.ends_with?(path, "/comments") do
+          [valid_intent(), %{valid_marker() | "created_at" => "2026-01-03T00:00:00Z"}]
+        else
+          issue_response("closed")
+        end
+
+      {:ok, %{status: 200, body: body}}
+    end
+
+    assert {:error, {:recovery_failed, {:error, :invalid_timeline_response}}} =
+             Completion.audit_closed(@issue, @settings, early_marker)
   end
 
   defp completion_opts(responses) do
     test_pid = self()
+    {:ok, comments} = Agent.start(fn -> Map.get(responses, "/repos/octo/repo/issues/42/comments", []) end)
+    on_exit(fn -> if Process.alive?(comments), do: Agent.stop(comments) end)
 
     [
       completion_policy: "merged_pr",
@@ -325,10 +521,19 @@ defmodule SymphonyElixir.GitHub.CompletionTest do
         send(test_pid, {:request, method, path, body})
 
         case {method, path} do
-          {"PATCH", "/repos/octo/repo/issues/42"} -> {:ok, %{status: 200, body: %{"state" => "closed"}}}
-          {"POST", "/repos/octo/repo/issues/42/comments"} -> {:ok, %{status: 201, body: %{}}}
-          {"GET", "/repos/octo/repo/issues/42/comments"} -> {:ok, %{status: 200, body: Map.get(responses, path, [])}}
-          _ -> {:ok, %{status: 200, body: Map.fetch!(responses, path)}}
+          {"PATCH", "/repos/octo/repo/issues/42"} ->
+            {:ok, %{status: 200, body: issue_response("closed")}}
+
+          {"POST", "/repos/octo/repo/issues/42/comments"} ->
+            comment = if body["body"] == "<!-- symphony-close-intent:pr=57 -->", do: valid_intent(), else: valid_marker()
+            Agent.update(comments, &[comment | &1])
+            {:ok, %{status: 201, body: comment}}
+
+          {"GET", "/repos/octo/repo/issues/42/comments"} ->
+            {:ok, %{status: 200, body: Agent.get(comments, & &1)}}
+
+          _ ->
+            {:ok, %{status: 200, body: Map.fetch!(responses, path)}}
         end
       end
     ]
@@ -357,4 +562,14 @@ defmodule SymphonyElixir.GitHub.CompletionTest do
       "base" => %{"ref" => "main", "repo" => %{"full_name" => "octo/repo"}}
     }
   end
+
+  defp issue_response("closed"),
+    do: %{"state" => "closed", "number" => 42, "closed_at" => "2026-01-04T00:00:00Z", "closed_by" => %{"id" => 7}}
+
+  defp issue_response(state), do: %{"state" => state, "number" => 42}
+
+  defp valid_marker, do: %{"body" => "<!-- symphony-completion:pr=57 -->", "created_at" => "2026-01-04T00:00:01Z"}
+  defp valid_intent, do: %{"body" => "<!-- symphony-close-intent:pr=57 -->", "created_at" => "2026-01-03T23:59:59Z", "user" => %{"id" => 7}}
+
+  defp response(body), do: {:ok, %{status: 200, body: body}}
 end

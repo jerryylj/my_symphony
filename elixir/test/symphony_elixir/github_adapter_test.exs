@@ -18,8 +18,24 @@ defmodule SymphonyElixir.GitHub.AdapterTest do
 
     def request("GET", path, _params, nil, _opts) do
       send(self(), {:github_audit_path, path})
-      {:ok, %{status: 200, body: []}}
+      body = if String.ends_with?(path, "/comments"), do: [], else: %{"state" => "closed", "closed_at" => "2026-01-04T00:00:00Z"}
+      {:ok, %{status: 200, body: body}}
     end
+  end
+
+  defmodule UnavailableAuditGitHubClient do
+    alias SymphonyElixir.Tracker.Issue
+
+    def fetch_issues_by_states(states) do
+      if "closed" in states do
+        {:ok, [%Issue{id: "42", identifier: "GH-42", title: "Completed", state: "closed", url: "https://github.com/octo/repo/issues/42"}]}
+      else
+        {:ok, []}
+      end
+    end
+
+    def fetch_issues_by_ids(_ids), do: {:ok, []}
+    def request(_method, _path, _params, _body, _opts), do: {:error, :timeout}
   end
 
   setup do
@@ -518,7 +534,19 @@ defmodule SymphonyElixir.GitHub.AdapterTest do
   end
 
   test "a session keeps its merged-PR completion gate across workflow reload" do
+    previous = System.get_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED")
+    System.put_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED", "octo/repo")
+    on_exit(fn -> restore_smoke_verification(previous) end)
     write_github_workflow!(Workflow.workflow_file_path(), "test-token", "merged_pr")
+    Application.put_env(:symphony_elixir, :github_client_module, FakeGitHubClient)
+    audit_issue = %Issue{id: "42", identifier: "GH-42", state: "closed", url: "https://github.com/octo/repo/issues/42"}
+
+    audit_log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, :out_of_band_closure} = Tracker.report_terminal_issue(audit_issue)
+      end)
+
+    assert audit_log =~ "out_of_band_closure"
     binding = Tracker.bind_agent_tools()
     assert Enum.map(binding.tool_specs, & &1["name"]) == ["github_api", "github_complete_issue", "github_push_branch"]
 
@@ -543,6 +571,53 @@ defmodule SymphonyElixir.GitHub.AdapterTest do
     refute denied["success"]
   end
 
+  test "merged-PR dispatch waits for the immediate predecessor to close" do
+    previous = System.get_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED")
+    System.put_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED", "octo/repo")
+    on_exit(fn -> restore_smoke_verification(previous) end)
+    write_github_workflow!(Workflow.workflow_file_path(), "test-token", "merged_pr")
+
+    successor = %Issue{id: "43", identifier: "GH-43", title: "Next", state: "open", dispatchable: true}
+    predecessor = %Issue{id: "42", identifier: "GH-42", title: "Current", state: "open"}
+
+    fetcher = fn
+      ["43"] -> {:ok, [successor]}
+      ["42"] -> {:ok, [predecessor]}
+    end
+
+    assert {:skip, ^successor} = Orchestrator.revalidate_issue_for_dispatch_for_test(successor, fetcher)
+
+    closed_fetcher = fn
+      ["43"] -> {:ok, [successor]}
+      ["42"] -> {:ok, [%{predecessor | state: "closed"}]}
+    end
+
+    assert {:ok, ^successor} = Orchestrator.revalidate_issue_for_dispatch_for_test(successor, closed_fetcher)
+  end
+
+  test "startup audit failure retains the workspace and retries with increasing backoff" do
+    previous = System.get_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED")
+    System.put_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED", "octo/repo")
+    on_exit(fn -> restore_smoke_verification(previous) end)
+    write_github_workflow!(Workflow.workflow_file_path(), "test-token", "merged_pr")
+    Application.put_env(:symphony_elixir, :github_client_module, UnavailableAuditGitHubClient)
+
+    issue = %Issue{id: "42", identifier: "GH-42", title: "Completed", state: "closed", url: "https://github.com/octo/repo/issues/42"}
+    workspace = Path.join(Config.local_workspace_root(), Workspace.workspace_key(issue))
+    File.mkdir_p!(workspace)
+
+    {:ok, pid} = Orchestrator.start_link(name: Module.concat(__MODULE__, :AuditRetryOrchestrator))
+    on_exit(fn -> if Process.alive?(pid), do: Process.exit(pid, :normal) end)
+
+    state = :sys.get_state(pid)
+    assert File.dir?(workspace)
+    assert %{attempt: 1} = state.retry_attempts["42"]
+
+    retry_state = Orchestrator.handle_retry_issue_lookup_for_test(issue, state, "42", 3, %{workspace_path: workspace})
+    assert %{attempt: 4} = retry_state.retry_attempts["42"]
+    assert File.dir?(workspace)
+  end
+
   test "adapter audits closed issues only when the merged-PR policy is active" do
     Application.put_env(:symphony_elixir, :github_client_module, FakeGitHubClient)
     issue = %Issue{id: "42", identifier: "GH-42", url: "https://github.com/octo/repo/issues/42"}
@@ -553,8 +628,12 @@ defmodule SymphonyElixir.GitHub.AdapterTest do
     assert {:error, :out_of_band_closure} =
              GitHubAdapter.audit_terminal_issue(issue, Map.put(tracker_settings(), :completion_policy, "merged_pr"))
 
+    assert_received {:github_audit_path, "/repos/octo/repo/issues/42"}
     assert_received {:github_audit_path, "/repos/octo/repo/issues/42/comments"}
   end
+
+  defp restore_smoke_verification(nil), do: System.delete_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED")
+  defp restore_smoke_verification(value), do: System.put_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED", value)
 
   defp tracker_settings(provider_overrides \\ %{}) do
     %{
@@ -602,6 +681,8 @@ defmodule SymphonyElixir.GitHub.AdapterTest do
           token: #{Jason.encode!(token)}
         active_states: ["open"]
         terminal_states: ["closed"]
+      workspace:
+        root: "./workspaces"
       codex:
         turn_sandbox_policy:
           type: workspaceWrite

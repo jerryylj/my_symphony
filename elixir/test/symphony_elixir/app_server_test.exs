@@ -1497,6 +1497,17 @@ defmodule SymphonyElixir.AppServerTest do
   end
 
   test "merged-PR session passes a network-denied sandbox and refuses shell escalation" do
+    previous_smoke_verification = System.get_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED")
+    System.put_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED", "octo/repo")
+
+    on_exit(fn ->
+      if previous_smoke_verification do
+        System.put_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED", previous_smoke_verification)
+      else
+        System.delete_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED")
+      end
+    end)
+
     root = Path.join(System.tmp_dir!(), "symphony-completion-sandbox-#{System.unique_integer([:positive])}")
     workspace_root = Path.join(root, "workspaces")
     workspace = Path.join(workspace_root, "GH-42")

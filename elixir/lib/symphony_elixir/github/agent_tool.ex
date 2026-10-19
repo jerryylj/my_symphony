@@ -144,15 +144,15 @@ defmodule SymphonyElixir.GitHub.AgentTool do
   defp authorize_guarded_request("GET", _path, _body, _opts), do: :ok
 
   defp authorize_guarded_request("POST", path, body, opts) do
-    if permitted_pr_write?("POST", path, opts), do: :ok, else: authorize_issue_comment(path, body, opts)
+    if pr_creation_path?(path, opts), do: :ok, else: authorize_issue_comment(path, body, opts)
   end
 
   defp authorize_guarded_request("PATCH", path, _body, opts) do
-    if permitted_pr_write?("PATCH", path, opts), do: :ok, else: {:error, :completion_policy_denies_issue_write}
+    authorize_bound_pr_write("PATCH", path, opts)
   end
 
   defp authorize_guarded_request("PUT", path, _body, opts) do
-    if permitted_pr_write?("PUT", path, opts), do: :ok, else: {:error, :completion_policy_denies_issue_write}
+    authorize_bound_pr_write("PUT", path, opts)
   end
 
   defp authorize_guarded_request(_method, _path, _body, _opts), do: {:error, :completion_policy_denies_issue_write}
@@ -162,25 +162,53 @@ defmodule SymphonyElixir.GitHub.AgentTool do
          %{provider: %{"repo" => repo}} <- opts[:tracker_settings],
          true <- path == "/repos/#{repo}/issues/#{id}/comments",
          %{"body" => text} when is_binary(text) <- body,
-         false <- String.contains?(text, "<!-- symphony-completion:") do
+         false <- String.contains?(text, "<!-- symphony-completion:"),
+         false <- String.contains?(text, "<!-- symphony-close-intent:") do
       :ok
     else
       _ -> {:error, :completion_policy_denies_issue_write}
     end
   end
 
-  defp permitted_pr_write?(method, path, opts) do
+  defp pr_creation_path?(path, opts) do
     case opts[:tracker_settings] do
       %{provider: %{"repo" => repo}} ->
-        case {method, String.replace_prefix(path, "/repos/#{repo}/", "")} do
-          {"POST", "pulls"} -> true
-          {"PATCH", suffix} -> String.match?(suffix, ~r/^pulls\/[1-9][0-9]*$/)
-          {"PUT", suffix} -> String.match?(suffix, ~r/^pulls\/[1-9][0-9]*\/merge$/)
-          _ -> false
-        end
+        path == "/repos/#{repo}/pulls" and is_map(opts[:issue])
 
       _ ->
         false
+    end
+  end
+
+  defp authorize_bound_pr_write(method, path, opts) do
+    with %{provider: %{"repo" => repo}} = settings <- opts[:tracker_settings],
+         %{id: _id} = issue <- opts[:issue],
+         suffix <- String.replace_prefix(path, "/repos/#{repo}/pulls/", ""),
+         true <- suffix != path,
+         {:ok, pr_number} <- parse_pr_write_target(method, suffix),
+         client <- Keyword.get(opts, :github_client, &Client.request/5),
+         {:ok, true} <- Completion.associated_pr?(issue, settings, pr_number, client) do
+      :ok
+    else
+      {:ok, false} -> {:error, :completion_policy_denies_unrelated_pr}
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :completion_policy_denies_issue_write}
+    end
+  end
+
+  defp parse_pr_write_target("PATCH", suffix), do: parse_positive_number(suffix)
+
+  defp parse_pr_write_target("PUT", suffix) do
+    case String.split(suffix, "/") do
+      [number, "merge"] -> parse_positive_number(number)
+      _ -> {:error, :completion_policy_denies_issue_write}
+    end
+  end
+
+  defp parse_positive_number(value) do
+    case Integer.parse(value) do
+      {number, ""} when number > 0 -> {:ok, number}
+      _ -> {:error, :completion_policy_denies_issue_write}
     end
   end
 

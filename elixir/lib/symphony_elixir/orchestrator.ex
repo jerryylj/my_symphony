@@ -69,7 +69,7 @@ defmodule SymphonyElixir.Orchestrator do
           codex_rate_limits: nil
         }
 
-        run_terminal_workspace_cleanup()
+        state = run_terminal_workspace_cleanup(state)
         state = schedule_tick(state, 0)
 
         {:ok, state}
@@ -77,6 +77,11 @@ defmodule SymphonyElixir.Orchestrator do
       {:error, reason} ->
         {:stop, reason}
     end
+  end
+
+  @impl true
+  def handle_info({:retry_terminal_workspace_cleanup, attempt}, state) when is_integer(attempt) do
+    {:noreply, run_terminal_workspace_cleanup(state, attempt)}
   end
 
   @impl true
@@ -448,10 +453,12 @@ defmodule SymphonyElixir.Orchestrator do
   defp reconcile_issue_state(%Issue{} = issue, state, active_states, terminal_states) do
     cond do
       terminal_issue_state?(issue.state, terminal_states) ->
-        audit_terminal_issue(issue)
+        audit_result = audit_terminal_issue(issue)
         Logger.info("Issue moved to terminal state: #{issue_context(issue)} state=#{issue.state}; stopping active agent")
 
-        terminate_running_issue(state, issue.id, true)
+        metadata = Map.get(state.running, issue.id, %{})
+        state = terminate_running_issue(state, issue.id, audit_result == :ok)
+        retry_terminal_audit(state, issue, metadata, audit_result)
 
       !issue_routable?(issue) ->
         Logger.info("Issue no longer routed to this worker: #{issue_context(issue)} assignee=#{inspect(issue.assignee_id)}; stopping active agent")
@@ -484,10 +491,11 @@ defmodule SymphonyElixir.Orchestrator do
   defp reconcile_blocked_issue_state(%Issue{} = issue, state, active_states, terminal_states) do
     cond do
       terminal_issue_state?(issue.state, terminal_states) ->
-        audit_terminal_issue(issue)
+        audit_result = audit_terminal_issue(issue)
         Logger.info("Blocked issue moved to terminal state: #{issue_context(issue)} state=#{issue.state}; releasing block")
-        cleanup_issue_workspace(issue, Map.get(state.blocked, issue.id, %{}))
-        release_issue_claim(state, issue.id)
+        metadata = Map.get(state.blocked, issue.id, %{})
+        if audit_result == :ok, do: cleanup_issue_workspace(issue, metadata)
+        state |> release_issue_claim(issue.id) |> retry_terminal_audit(issue, metadata, audit_result)
 
       !issue_routable?(issue) ->
         Logger.info("Blocked issue no longer routed to this worker: #{issue_context(issue)} assignee=#{inspect(issue.assignee_id)}; releasing block")
@@ -505,10 +513,25 @@ defmodule SymphonyElixir.Orchestrator do
   defp reconcile_blocked_issue_state(_issue, state, _active_states, _terminal_states), do: state
 
   defp audit_terminal_issue(issue) do
-    case Tracker.audit_terminal_issue(issue) do
-      :ok -> :ok
-      {:error, reason} -> Logger.error("GitHub completion policy violation issue=#{issue.identifier} reason=#{inspect(reason)}")
-    end
+    Tracker.report_terminal_issue(issue)
+  end
+
+  defp retry_terminal_audit(state, issue, metadata, result), do: retry_terminal_audit(state, issue, metadata, result, 1)
+
+  defp retry_terminal_audit(state, _issue, _metadata, :ok, _attempt), do: state
+
+  defp retry_terminal_audit(state, _issue, _metadata, {:error, reason}, _attempt)
+       when reason in [:out_of_band_closure, :ambiguous_close_intent, :repository_mismatch, :invalid_audit_context],
+       do: state
+
+  defp retry_terminal_audit(state, issue, metadata, {:error, reason}, attempt) do
+    schedule_issue_retry(state, issue.id, attempt, %{
+      identifier: issue.identifier,
+      issue_url: issue.url,
+      worker_host: Map.get(metadata, :worker_host),
+      workspace_path: Map.get(metadata, :workspace_path),
+      error: "terminal audit failed: #{inspect(reason)}"
+    })
   end
 
   defp reconcile_missing_running_issue_ids(%State{} = state, requested_issue_ids, issues)
@@ -1050,11 +1073,7 @@ defmodule SymphonyElixir.Orchestrator do
        when is_binary(issue_id) and is_function(issue_fetcher, 1) do
     case issue_fetcher.([issue_id]) do
       {:ok, [%Issue{} = refreshed_issue | _]} ->
-        if retry_candidate_issue?(refreshed_issue, terminal_states) do
-          {:ok, refreshed_issue}
-        else
-          {:skip, refreshed_issue}
-        end
+        revalidate_fetched_issue(refreshed_issue, issue_fetcher, terminal_states)
 
       {:ok, []} ->
         {:skip, :missing}
@@ -1065,6 +1084,42 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp revalidate_issue_for_dispatch(issue, _issue_fetcher, _terminal_states), do: {:ok, issue}
+
+  defp revalidate_fetched_issue(issue, issue_fetcher, terminal_states) do
+    if retry_candidate_issue?(issue, terminal_states) do
+      case serial_predecessor_ready?(issue, issue_fetcher) do
+        :ok -> {:ok, issue}
+        :waiting -> {:skip, issue}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      {:skip, issue}
+    end
+  end
+
+  defp serial_predecessor_ready?(%Issue{id: id}, issue_fetcher) do
+    case Config.settings!().tracker.completion_policy do
+      "merged_pr" -> check_serial_predecessor(id, issue_fetcher)
+      _ -> :ok
+    end
+  end
+
+  defp check_serial_predecessor(id, issue_fetcher) do
+    with {number, ""} when number > 1 <- Integer.parse(id),
+         {:ok, predecessors} <- issue_fetcher.([Integer.to_string(number - 1)]) do
+      predecessor_ready?(predecessors)
+    else
+      {1, ""} -> :ok
+      :error -> {:error, :invalid_serial_issue_id}
+      {:error, reason} -> {:error, reason}
+      {_number, _rest} -> {:error, :invalid_serial_issue_id}
+    end
+  end
+
+  defp predecessor_ready?([]), do: :ok
+  defp predecessor_ready?([%Issue{state: "closed"} | _]), do: :ok
+  defp predecessor_ready?([%Issue{} | _]), do: :waiting
+  defp predecessor_ready?(_), do: {:error, :invalid_predecessor_response}
 
   defp complete_issue(%State{} = state, issue_id) do
     %{
@@ -1158,10 +1213,19 @@ defmodule SymphonyElixir.Orchestrator do
 
     cond do
       terminal_issue_state?(issue.state, terminal_states) ->
-        Logger.info("Issue state is terminal: issue_id=#{issue_id} issue_identifier=#{issue.identifier} state=#{issue.state}; removing associated workspace")
+        audit_result = audit_terminal_issue(issue)
 
-        cleanup_issue_workspace(issue, metadata)
-        {:noreply, release_issue_claim(state, issue_id)}
+        if audit_result == :ok do
+          Logger.info("Issue state is terminal: issue_id=#{issue_id} issue_identifier=#{issue.identifier} state=#{issue.state}; removing associated workspace")
+          cleanup_issue_workspace(issue, metadata)
+        end
+
+        state =
+          state
+          |> release_issue_claim(issue_id)
+          |> retry_terminal_audit(issue, metadata, audit_result, attempt + 1)
+
+        {:noreply, state}
 
       retry_candidate_issue?(issue, terminal_states) ->
         handle_active_retry(state, issue, attempt, metadata)
@@ -1200,20 +1264,39 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp cleanup_issue_workspace(_issue_or_identifier, _worker_host), do: :ok
 
-  defp run_terminal_workspace_cleanup do
+  defp run_terminal_workspace_cleanup(state, attempt \\ 1) do
     case Tracker.fetch_issues_by_states(Config.settings!().tracker.terminal_states) do
       {:ok, issues} ->
         issues
-        |> Enum.each(fn
-          %Issue{} = issue ->
-            cleanup_issue_workspace(issue)
+        |> Enum.reduce(state, fn
+          %Issue{} = issue, acc ->
+            cleanup_terminal_workspace_if_audited(issue, acc)
 
-          _ ->
-            :ok
+          _, acc ->
+            acc
         end)
 
       {:error, reason} ->
         Logger.warning("Skipping startup terminal workspace cleanup; failed to fetch terminal issues: #{inspect(reason)}")
+        Process.send_after(self(), {:retry_terminal_workspace_cleanup, attempt + 1}, retry_delay(attempt, %{}))
+        state
+    end
+  end
+
+  defp cleanup_terminal_workspace_if_audited(issue, state) do
+    workspace = Path.join(Config.local_workspace_root(), Workspace.workspace_key(issue))
+
+    if File.dir?(workspace) do
+      case Tracker.report_terminal_issue(issue) do
+        :ok ->
+          cleanup_issue_workspace(issue)
+          state
+
+        {:error, reason} ->
+          retry_terminal_audit(state, issue, %{workspace_path: workspace}, {:error, reason})
+      end
+    else
+      state
     end
   end
 

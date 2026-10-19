@@ -129,15 +129,20 @@ defmodule SymphonyElixir.Config do
        when kind != "github",
        do: {:error, :completion_policy_requires_github}
 
-  defp validate_completion_sandbox(%{tracker: %{completion_policy: "merged_pr"}, codex: codex, worker: worker}) do
+  defp validate_completion_sandbox(%{tracker: %{completion_policy: "merged_pr", provider: provider}, codex: codex, worker: worker}) do
     policy = codex.turn_sandbox_policy || %{}
+    repo = provider["repo"]
 
-    if codex.thread_sandbox == "workspace-write" and policy["type"] in [nil, "workspaceWrite"] and
-         policy["networkAccess"] in [nil, false] and
-         worker.ssh_hosts == [] do
-      :ok
-    else
-      {:error, :merged_pr_requires_network_isolated_agent}
+    cond do
+      codex.thread_sandbox != "workspace-write" or policy["type"] not in [nil, "workspaceWrite"] or
+        policy["networkAccess"] not in [nil, false] or worker.ssh_hosts != [] ->
+        {:error, :merged_pr_requires_network_isolated_agent}
+
+      System.get_env("SYMPHONY_GITHUB_AUTO_CLOSE_SMOKE_VERIFIED") != repo ->
+        {:error, :github_auto_close_smoke_not_verified}
+
+      true ->
+        :ok
     end
   end
 
