@@ -4,20 +4,12 @@ include:
 prompt_file: ../workflow-libraries/github-serial.md
 tracker:
   provider:
-    repo: jerryylj/vedio_monitor_model
+    repo: kunkun-code-org/vedio_monitor_model
 workspace:
   root: ~/code/vedio-monitor-model-symphony-workspaces
 hooks:
   after_create: |
-    GIT_CONFIG_COUNT=1 \
-    GIT_CONFIG_KEY_0=http.version \
-    GIT_CONFIG_VALUE_0=HTTP/1.1 \
-    http_proxy=http://127.0.0.1:7890 \
-    https_proxy=http://127.0.0.1:7890 \
-    all_proxy=http://127.0.0.1:7890 \
-    no_proxy=localhost,127.0.0.1 \
-    NO_PROXY=localhost,127.0.0.1 \
-    gh repo clone jerryylj/vedio_monitor_model . -- --depth 1
+    git clone --depth 1 git@github.com:kunkun-code-org/vedio_monitor_model.git .
 agent:
   max_turns: 40
 codex:

@@ -10,15 +10,7 @@ workspace:
   root: ~/code/stock-manage-symphony-workspaces
 hooks:
   after_create: |
-    GIT_CONFIG_COUNT=1 \
-    GIT_CONFIG_KEY_0=http.version \
-    GIT_CONFIG_VALUE_0=HTTP/1.1 \
-    http_proxy=http://127.0.0.1:7890 \
-    https_proxy=http://127.0.0.1:7890 \
-    all_proxy=http://127.0.0.1:7890 \
-    no_proxy=localhost,127.0.0.1 \
-    NO_PROXY=localhost,127.0.0.1 \
-    gh repo clone kunkun-code-org/stock_manage . -- --depth 1
+    git clone --depth 1 git@github.com:kunkun-code-org/stock_manage.git .
 agent:
   max_turns: 40
   block_on_max_turns: true

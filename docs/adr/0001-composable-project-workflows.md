@@ -3,7 +3,7 @@
 <!-- status: accepted -->
 
 `stock_manage` and `vedio_monitor_model` repeat the same GitHub serial-agent flow while needing
-different repository, workspace, credential-path, and turn-limit settings. Symphony will resolve a
+different repository, workspace, credential-source, and turn-limit settings. Symphony will resolve a
 project-owned workflow entry from ordered, repository-owned YAML libraries plus one shared Markdown
 prompt. The entry overrides libraries through documented deep-merge rules; its existing behavioural
 differences remain explicit rather than being normalised away.
@@ -45,10 +45,10 @@ my/
 │   └── github-serial.md           # repository-agnostic serial issue/PR/recovery instructions
 ├── stock_manage/
 │   ├── WORKFLOW.md                # includes library; repo, workspace, clone hook, 2-turn policy
-│   └── start-service.sh           # remains the project launcher and secret-file owner
+│   └── start-service.sh           # remains the project launcher and credential owner
 └── vedio_monitor_model/
     ├── WORKFLOW.md                # includes library; repo, workspace, clone hook, 40-turn policy
-    └── start-service.sh           # remains the project launcher and secret-file owner
+    └── start-service.sh           # remains the project launcher and credential owner
 ```
 
 The runtime implementation belongs behind one workflow-resolution seam:

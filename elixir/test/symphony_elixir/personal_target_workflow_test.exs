@@ -25,16 +25,14 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
     assert :ok = Config.validate_settings(settings)
 
     assert settings.tracker.kind == "github"
-    assert settings.tracker.provider["repo"] == "jerryylj/vedio_monitor_model"
+    assert settings.tracker.provider["repo"] == "kunkun-code-org/vedio_monitor_model"
     assert settings.tracker.required_labels == ["agent-ready"]
     assert settings.tracker.active_states == ["open"]
     assert settings.tracker.terminal_states == ["closed"]
     assert settings.agent.max_concurrent_agents == 1
     assert settings.hooks.timeout_ms == 300_000
 
-    assert settings.hooks.after_create =~ "gh repo clone jerryylj/vedio_monitor_model ."
-    assert settings.hooks.after_create =~ "GIT_CONFIG_VALUE_0=HTTP/1.1"
-    assert settings.hooks.after_create =~ "http_proxy=http://127.0.0.1:7890"
+    assert settings.hooks.after_create =~ "git clone --depth 1 git@github.com:kunkun-code-org/vedio_monitor_model.git ."
     refute settings.codex.command =~ "--profile"
     assert settings.codex.command =~ ~s(model="ark-code-latest")
     assert settings.codex.command =~ ~s(model_provider="volcengine")
@@ -61,7 +59,7 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
              ["WORKFLOW.md", "github-serial.yml", "github-serial.md"]
 
     assert prompt =~ "value from the `origin`"
-    refute prompt =~ "jerryylj/vedio_monitor_model"
+    refute prompt =~ "kunkun-code-org/vedio_monitor_model"
     assert prompt =~ "Refs #<current_number>"
     refute prompt =~ "Closes #<current_number>"
     assert prompt =~ "successor_number = current_number + 1"

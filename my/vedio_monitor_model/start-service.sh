@@ -1,21 +1,19 @@
-#!/bin/bash
+#!/bin/zsh
 set -euo pipefail
 
-repo_root="${SYMPHONY_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+repo_root="${SYMPHONY_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 workflow="$repo_root/my/vedio_monitor_model/WORKFLOW.md"
 logs_root="${SYMPHONY_LOGS_ROOT:-$HOME/code/vedio-monitor-model-symphony-logs}"
-port="${SYMPHONY_PORT:-4102}"
+port="${SYMPHONY_PORT:-4103}"
 escript="${MISE_ESCRIPT:-$HOME/.local/share/mise/installs/erlang/28.5/bin/escript}"
 
 export PATH="$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
-env_file="${SYMPHONY_GITHUB_TOKEN_FILE:-$HOME/.config/symphony/vedio-monitor-model/GITHUB_TOKEN}"
 model_env_file="${SYMPHONY_MODEL_ENV_FILE:-$HOME/.config/symphony/vedio-monitor-model/environment}"
 
-if [[ -r "$env_file" ]]; then
-  export GITHUB_TOKEN="$(cat "$env_file")"
-else
-  export GITHUB_TOKEN="$(gh auth token)"
-fi
+source "$HOME/.zshrc"
+: "${ORG_GITHUB_TOKEN:?Set ORG_GITHUB_TOKEN in ~/.zshrc}"
+export GITHUB_TOKEN="$ORG_GITHUB_TOKEN"
+unset ORG_GITHUB_TOKEN SELF_GITHUB_TOKEN GH_TOKEN
 
 if [[ -r "$model_env_file" ]]; then
   source "$model_env_file"
