@@ -1623,6 +1623,14 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       assert {:error, {:unsafe_turn_sandbox_policy, {:invalid_workspace_root, 123}}} =
                Schema.resolve_runtime_turn_sandbox_policy(settings, 123)
+
+      partial_settings = %{
+        settings
+        | codex: %{settings.codex | turn_sandbox_policy: %{"type" => "workspaceWrite", "networkAccess" => false}}
+      }
+
+      assert {:error, {:unsafe_turn_sandbox_policy, {:invalid_workspace_root, 123}}} =
+               Schema.resolve_runtime_turn_sandbox_policy(partial_settings, 123)
     after
       File.rm_rf(test_root)
     end
