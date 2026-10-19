@@ -29,6 +29,8 @@ Tell your favorite coding agent to build Symphony in a programming language of y
 
 Check out [elixir/README.md](elixir/README.md) for instructions on how to set up your environment
 and run the Elixir-based Symphony implementation, including reusable project workflow libraries.
+GitHub workflows can opt into a deterministic merged-PR completion gate: Symphony verifies the PR,
+releases the immediate successor, and closes the issue through its GitHub adapter.
 You can also ask your favorite coding agent to help with the setup:
 
 > Set up Symphony for my repository based on

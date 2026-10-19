@@ -18,6 +18,7 @@ defmodule SymphonyElixir.PromptBuilder do
     |> Solid.render!(
       %{
         "attempt" => Keyword.get(opts, :attempt),
+        "completion_policy" => Keyword.get_lazy(opts, :completion_policy, fn -> Config.settings!().tracker.completion_policy end),
         "issue" => issue |> Map.from_struct() |> to_solid_map()
       },
       @render_opts

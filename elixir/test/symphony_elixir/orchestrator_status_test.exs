@@ -1651,6 +1651,19 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
              "unsupported dynamic tool call rejected (unknown_tool)"
   end
 
+  test "status dashboard shows the GitHub completion outcome" do
+    message = %{
+      event: :tool_call_failed,
+      message: %{
+        payload: %{"method" => "item/tool/call", "params" => %{"tool" => "github_complete_issue"}},
+        result: %{"output" => Jason.encode!(%{"outcome" => "open_pr"})}
+      }
+    }
+
+    assert StatusDashboard.humanize_codex_message(message) ==
+             "dynamic tool call failed (github_complete_issue): open_pr"
+  end
+
   test "status dashboard unwraps nested codex payload envelopes" do
     wrapped = %{
       event: :notification,

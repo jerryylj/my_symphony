@@ -1314,7 +1314,8 @@ Orchestrator behavior on tracker errors:
 
 ### 11.5 Tracker Writes and Agent Tools (Important Boundary)
 
-Symphony does not require first-class tracker write APIs in the orchestrator.
+Symphony does not require first-class tracker write APIs in the orchestrator. An opt-in GitHub
+merged-PR completion policy has one host-side tracker write operation at the adapter boundary.
 
 - Ticket mutations (state transitions, comments, attachments, PR metadata) are typically handled by
   the coding agent through the selected adapter's provider-native tools.
@@ -1322,7 +1323,16 @@ Symphony does not require first-class tracker write APIs in the orchestrator.
   not a raw token.
 - The current normalized issue is available to tool execution as context, including opaque
   `native_ref`, so adapters can retain provider richness without adding it to the core scheduler.
-- The service remains a scheduler/runner and tracker reader.
+- For GitHub workflows with `tracker.completion_policy: merged_pr`, the coding agent can request
+  completion but cannot directly mutate issue state or successor dispatch labels. Symphony verifies
+  a cross-referenced PR merged into the repository default branch, labels only the immediate
+  successor, records a durable completion marker, and closes the current issue. Missing/open PRs
+  leave the issue active; real external blockers can pause it under the workflow's turn policy.
+- These workflows deny agent-shell network access and expose host-side branch push and PR REST
+  operations. The repository must disable GitHub's automatic closing of linked issues before the
+  policy is activated. A closed issue without Symphony's completion marker is reported as a
+  policy violation.
+- For other workflows, the service remains a scheduler/runner and tracker reader.
 - Workflow-specific success often means "reached the next handoff state" (for example
   `Human Review`) rather than tracker terminal state `Done`.
 
@@ -1335,6 +1345,7 @@ Inputs to prompt rendering:
 - `workflow.prompt_template`
 - normalized `issue` object
 - OPTIONAL `attempt` integer (retry/continuation metadata)
+- OPTIONAL `completion_policy` string, captured from the effective workflow for the session
 
 ### 12.2 Rendering Rules
 

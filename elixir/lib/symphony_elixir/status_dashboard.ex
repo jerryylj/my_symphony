@@ -1125,11 +1125,11 @@ defmodule SymphonyElixir.StatusDashboard do
     if is_binary(decision), do: "#{base}: #{decision}", else: base
   end
 
-  defp humanize_codex_event(:tool_call_completed, _message, payload),
-    do: humanize_dynamic_tool_event("dynamic tool call completed", payload)
+  defp humanize_codex_event(:tool_call_completed, message, payload),
+    do: humanize_completion_event(message, payload, "dynamic tool call completed")
 
-  defp humanize_codex_event(:tool_call_failed, _message, payload),
-    do: humanize_dynamic_tool_event("dynamic tool call failed", payload)
+  defp humanize_codex_event(:tool_call_failed, message, payload),
+    do: humanize_completion_event(message, payload, "dynamic tool call failed")
 
   defp humanize_codex_event(:unsupported_tool_call, _message, payload),
     do: humanize_dynamic_tool_event("unsupported dynamic tool call rejected", payload)
@@ -1411,6 +1411,21 @@ defmodule SymphonyElixir.StatusDashboard do
 
       _ ->
         base
+    end
+  end
+
+  defp humanize_completion_event(message, payload, base) do
+    summary = humanize_dynamic_tool_event(base, payload)
+
+    if dynamic_tool_name(payload) == "github_complete_issue" do
+      with %{"output" => output} <- map_value(message, [:result, "result"]),
+           {:ok, %{"outcome" => outcome}} <- Jason.decode(output) do
+        "#{summary}: #{outcome}"
+      else
+        _ -> summary
+      end
+    else
+      summary
     end
   end
 

@@ -54,6 +54,7 @@ defmodule SymphonyElixir.Config.Schema do
       field(:project_slug, :string)
       field(:assignee, :string)
       field(:provider, :map, default: %{})
+      field(:completion_policy, :string)
       field(:secret_environment_names, {:array, :string}, default: [])
       field(:required_labels, {:array, :string}, default: [])
       field(:active_states, {:array, :string})
@@ -72,6 +73,7 @@ defmodule SymphonyElixir.Config.Schema do
           :project_slug,
           :assignee,
           :provider,
+          :completion_policy,
           :required_labels,
           :active_states,
           :terminal_states
@@ -83,6 +85,7 @@ defmodule SymphonyElixir.Config.Schema do
         |> Enum.map(&(String.trim(&1) |> String.downcase()))
         |> Enum.uniq()
       end)
+      |> validate_inclusion(:completion_policy, ["merged_pr"])
     end
   end
 

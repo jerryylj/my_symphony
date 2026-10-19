@@ -5,7 +5,7 @@ defmodule SymphonyElixir.GitHub.Adapter do
 
   @behaviour SymphonyElixir.Tracker
 
-  alias SymphonyElixir.GitHub.{AgentTool, Client}
+  alias SymphonyElixir.GitHub.{AgentTool, Client, Completion}
   alias SymphonyElixir.Tracker.Issue
 
   @active_states ["open"]
@@ -24,7 +24,10 @@ defmodule SymphonyElixir.GitHub.Adapter do
              tracker_settings.terminal_states,
              @terminal_states,
              :missing_github_terminal_states
-           ) do
+           ),
+         true <-
+           Map.get(tracker_settings, :completion_policy) in [nil, "merged_pr"] or
+             {:error, :invalid_github_completion_policy} do
       Client.validate_settings(tracker_settings)
     end
   end
@@ -38,8 +41,19 @@ defmodule SymphonyElixir.GitHub.Adapter do
   @spec agent_tool_specs() :: [map()]
   def agent_tool_specs, do: AgentTool.tool_specs()
 
+  @spec agent_tool_specs(map()) :: [map()]
+  def agent_tool_specs(%{completion_policy: policy}), do: AgentTool.tool_specs(policy)
+
   @spec execute_agent_tool(String.t(), term(), keyword()) :: map()
   def execute_agent_tool(tool, arguments, opts), do: AgentTool.execute(tool, arguments, opts)
+
+  @spec audit_terminal_issue(Issue.t(), map()) :: :ok | {:error, term()}
+  def audit_terminal_issue(issue, %{completion_policy: "merged_pr"} = settings) do
+    client = client_module()
+    Completion.audit_closed(issue, settings, &client.request/5)
+  end
+
+  def audit_terminal_issue(_issue, _settings), do: :ok
 
   @spec secret_environment_names(map()) :: [String.t()]
   def secret_environment_names(tracker_settings), do: Client.secret_environment_names(tracker_settings)

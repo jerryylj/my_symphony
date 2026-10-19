@@ -119,9 +119,29 @@ defmodule SymphonyElixir.Config do
     if is_nil(settings.tracker.kind) do
       {:error, :missing_tracker_kind}
     else
-      Tracker.validate_config(settings.tracker)
+      with :ok <- Tracker.validate_config(settings.tracker) do
+        validate_completion_sandbox(settings)
+      end
     end
   end
+
+  defp validate_completion_sandbox(%{tracker: %{completion_policy: "merged_pr", kind: kind}})
+       when kind != "github",
+       do: {:error, :completion_policy_requires_github}
+
+  defp validate_completion_sandbox(%{tracker: %{completion_policy: "merged_pr"}, codex: codex, worker: worker}) do
+    policy = codex.turn_sandbox_policy || %{}
+
+    if codex.thread_sandbox == "workspace-write" and policy["type"] in [nil, "workspaceWrite"] and
+         policy["networkAccess"] in [nil, false] and
+         worker.ssh_hosts == [] do
+      :ok
+    else
+      {:error, :merged_pr_requires_network_isolated_agent}
+    end
+  end
+
+  defp validate_completion_sandbox(_settings), do: :ok
 
   defp format_config_error(reason) do
     case reason do

@@ -3,6 +3,8 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
 
   alias SymphonyElixir.Config
   alias SymphonyElixir.Config.Schema
+  alias SymphonyElixir.PromptBuilder
+  alias SymphonyElixir.Tracker.Issue
   alias SymphonyElixir.Workflow
 
   test "vedio monitor target workflow parses, validates, and requires strict serial dispatch" do
@@ -89,7 +91,12 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
     assert {:ok, settings} = Schema.parse(config)
     assert :ok = Config.validate_settings(settings)
 
-    assert settings.tracker.provider["repo"] == "jerryylj/stock_manage"
+    assert settings.tracker.provider["repo"] == "kunkun-code-org/stock_manage"
+    assert settings.tracker.completion_policy == "merged_pr"
+
+    assert {:error, :merged_pr_requires_network_isolated_agent} =
+             Config.validate_settings(%{settings | codex: %{settings.codex | turn_sandbox_policy: %{"type" => "workspaceWrite", "networkAccess" => true}}})
+
     assert settings.agent.max_turns == 40
     assert settings.agent.block_on_max_turns
 
@@ -99,9 +106,30 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
     assert prompt =~ "value from the `origin`"
     refute prompt =~ "jerryylj/stock_manage"
     assert prompt =~ "Having only `ready-for-agent` means `agent-ready` is missing"
+
+    previous_path = Workflow.workflow_file_path()
+    on_exit(fn -> Workflow.set_workflow_file_path(previous_path) end)
+    Workflow.set_workflow_file_path(path)
+
+    rendered =
+      PromptBuilder.build_prompt(
+        %Issue{
+          id: "42",
+          identifier: "GH-42",
+          title: "Example",
+          state: "open",
+          url: "https://github.com/kunkun-code-org/stock_manage/issues/42"
+        },
+        completion_policy: "merged_pr"
+      )
+
+    assert rendered =~ "github_complete_issue"
+    assert rendered =~ "github_push_branch"
+    refute rendered =~ "gh pr merge"
+    refute rendered =~ "git push -u"
   end
 
-  test "GitHub target workflows supply each issue workspace with network access" do
+  test "merged-PR workflows isolate the agent shell from GitHub while other workflows keep network access" do
     paths = [
       Path.expand("../../../my/WORKFLOW.md", __DIR__),
       Path.expand("../../../my/stock_manage/WORKFLOW.md", __DIR__),
@@ -127,7 +155,7 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
                Schema.resolve_runtime_turn_sandbox_policy(settings, System.tmp_dir!())
 
       assert policy["type"] == "workspaceWrite"
-      assert policy["networkAccess"]
+      assert policy["networkAccess"] == (settings.tracker.completion_policy != "merged_pr")
       assert policy["writableRoots"] != []
     end)
   end

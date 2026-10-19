@@ -1496,6 +1496,80 @@ defmodule SymphonyElixir.AppServerTest do
     end
   end
 
+  test "merged-PR session passes a network-denied sandbox and refuses shell escalation" do
+    root = Path.join(System.tmp_dir!(), "symphony-completion-sandbox-#{System.unique_integer([:positive])}")
+    workspace_root = Path.join(root, "workspaces")
+    workspace = Path.join(workspace_root, "GH-42")
+    binary = Path.join(root, "fake-codex")
+    trace = Path.join(root, "app-server.trace")
+    File.mkdir_p!(workspace)
+    on_exit(fn -> File.rm_rf(root) end)
+
+    File.write!(binary, """
+    #!/bin/sh
+    count=0
+    while IFS= read -r line; do
+      count=$((count + 1))
+      printf '%s\\n' "$line" >> "#{trace}"
+      case "$count" in
+        1) printf '%s\\n' '{"id":1,"result":{}}' ;;
+        2) printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-42"}}}' ;;
+        3) printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-42"}}}' ;;
+        4)
+          printf '%s\\n' '{"id":99,"method":"item/commandExecution/requestApproval","params":{"command":"gh issue close 42"}}'
+          ;;
+        *) sleep 1 ;;
+      esac
+    done
+    """)
+
+    File.chmod!(binary, 0o755)
+
+    File.write!(Workflow.workflow_file_path(), """
+    ---
+    tracker:
+      kind: github
+      completion_policy: merged_pr
+      provider:
+        repo: octo/repo
+        token: test-token
+      active_states: [open]
+      terminal_states: [closed]
+    workspace:
+      root: #{workspace_root}
+    codex:
+      command: #{binary} app-server
+      approval_policy: never
+      thread_sandbox: workspace-write
+      turn_sandbox_policy:
+        type: workspaceWrite
+        networkAccess: false
+    ---
+    Complete {{ issue.identifier }}.
+    """)
+
+    assert :ok = SymphonyElixir.WorkflowStore.force_reload()
+
+    issue = %Issue{id: "42", identifier: "GH-42", title: "Completion sandbox", state: "open", url: "https://github.com/octo/repo/issues/42"}
+
+    assert {:error, {:approval_required, %{"method" => "item/commandExecution/requestApproval"}}} =
+             AppServer.run(workspace, "test", issue)
+
+    messages = trace |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+
+    assert Enum.any?(messages, fn message ->
+             message["method"] == "turn/start" and
+               get_in(message, ["params", "sandboxPolicy", "networkAccess"]) == false
+           end)
+
+    assert Enum.any?(messages, fn message ->
+             message["method"] == "thread/start" and
+               Enum.any?(get_in(message, ["params", "dynamicTools"]), &(&1["name"] == "github_complete_issue"))
+           end)
+
+    refute Enum.any?(messages, &(&1["id"] == 99))
+  end
+
   test "app server launches over ssh for remote workers" do
     test_root =
       Path.join(

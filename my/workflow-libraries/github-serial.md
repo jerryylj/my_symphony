@@ -35,9 +35,16 @@ Implement only the current issue. Do not modify Symphony source, bundled workflo
 project documentation, tests, or checked-in skills unless the issue explicitly requires it. Do not
 modify or replace Matt's skills.
 
+{% if completion_policy == 'merged_pr' %}
+Use `github_api` for GitHub reads, current-issue status comments, and PR creation/merge. Use
+`github_push_branch` to push the current feature branch. The agent shell has no network access.
+Never call raw issue-state or successor-label mutations; only `github_complete_issue` may close
+the current issue and release the next one. Do not read, copy, or forward tracker credentials.
+{% else %}
 Use Symphony's configured `github_api` tool for all GitHub issue reads, comments, labels, and state
 changes. Do not read, copy, or forward tracker credentials. Do not use the GitHub API tool for
 unrelated issues.
+{% endif %}
 
 ## Recovery gate
 
@@ -68,6 +75,17 @@ merged pull request:
    use `$tdd` where a pre-agreed seam exists, run typechecking and targeted tests regularly, run the
    complete relevant test suite once at the end, run its own review step, and commit the work to the
    current branch. Do not invoke `$code-review` separately after `$implement`.
+{% if completion_policy == 'merged_pr' %}
+4. Publish through Symphony: call `github_push_branch` with `{}` to push the current branch. Create
+   or update the PR with `github_api` (`POST /repos/<repository>/pulls` or
+   `PATCH /repos/<repository>/pulls/{actual_pr_number}`). Include `Refs #<current_number>` in the
+   PR body. Do not use a GitHub auto-close keyword. Use `github_api` reads to check the PR's actual
+   number, mergeability, and required checks.
+5. Merge through `github_api` with `PUT /repos/<repository>/pulls/{actual_pr_number}/merge` and a
+   squash merge body. Do not use an admin override or substitute the issue number. If a real external
+   requirement prevents merging, comment on the current open issue and stop. If the merge succeeds,
+   call `github_complete_issue` with the actual `pr_number` before ending the turn.
+{% else %}
 4. Publish directly: push the current branch with `git push -u origin <branch>`, then create or update
    its pull request with `gh pr create`. Include `Refs #<current_number>` in the PR body so the issue has
    a durable association with its PR. Do not use auto-close keywords such as `Closes`; GitHub must not
@@ -77,6 +95,7 @@ merged pull request:
    Do not use `--admin`, auto-merge, or a substitute issue number. If the merge command fails, inspect
    the real failure; retry only transient failures, otherwise record the exact blocker on the current
    issue and stop without releasing a successor.
+{% endif %}
 6. Keep a concise status comment on the current issue at meaningful handoff points and whenever a
    blocker or human confirmation is required. Do not add duplicate status comments.
 
@@ -84,11 +103,22 @@ merged pull request:
 
 Creating or publishing a pull request is not ticket completion. In the same turn, inspect the current
 issue's associated pull request and, once its required checks pass and it is mergeable, directly squash
-merge it with `gh pr merge`. An open pull request is never an acceptable final status; a merged pull
-request requires the handoff below. Never spend a continuation turn on unrelated implementation once a
-pull request exists.
+merge it using the operation described above. An open pull request is never an acceptable final status;
+a merged pull request requires the handoff below. Never spend a continuation turn on unrelated
+implementation once a pull request exists.
 
 ## Handoff
+
+{% if completion_policy == 'merged_pr' %}
+Call `github_complete_issue` with the actual PR number after the merge. Symphony verifies the
+current issue's associated PR, its merged state and default-branch target, then labels only the
+immediate successor when applicable and closes the current issue. A missing or open PR leaves the
+current issue active: continue creating or landing it, rather than marking it blocked. If the
+operation reports a transient GitHub failure, retry safely. If it reports a real external blocker,
+record the exact reason on the open issue and stop. On a retry after a merge, request completion
+again; do not repeat implementation or publication. Never close the issue or label its successor
+directly, including through shell commands or GitHub's raw API.
+{% else %}
 
 A handoff is valid only after the direct merge command is confirmed by GitHub: the current ticket's
 actual pull request must be merged into the repository's default branch. Use the PR number or URL
@@ -137,3 +167,4 @@ Never label a successor while the current issue is unmerged, blocked, awaiting c
 otherwise incomplete. Never label more than the immediate successor. Symphony retains its normal
 retry behavior for the current issue; retries may continue that ticket but must not release the next
 one.
+{% endif %}

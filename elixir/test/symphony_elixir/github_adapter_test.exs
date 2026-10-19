@@ -15,6 +15,11 @@ defmodule SymphonyElixir.GitHub.AdapterTest do
       send(self(), {:github_ids_called, ids})
       {:ok, ids}
     end
+
+    def request("GET", path, _params, nil, _opts) do
+      send(self(), {:github_audit_path, path})
+      {:ok, %{status: 200, body: []}}
+    end
   end
 
   setup do
@@ -512,6 +517,45 @@ defmodule SymphonyElixir.GitHub.AdapterTest do
     assert :ok = Config.validate!()
   end
 
+  test "a session keeps its merged-PR completion gate across workflow reload" do
+    write_github_workflow!(Workflow.workflow_file_path(), "test-token", "merged_pr")
+    binding = Tracker.bind_agent_tools()
+    assert Enum.map(binding.tool_specs, & &1["name"]) == ["github_api", "github_complete_issue", "github_push_branch"]
+
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
+    assert Tracker.bind_agent_tools().tool_specs == []
+
+    issue = %Issue{id: "42", identifier: "GH-42", url: "https://github.com/octo/repo/issues/42"}
+
+    denied =
+      Tracker.execute_bound_agent_tool(
+        binding,
+        "github_api",
+        %{
+          "method" => "PATCH",
+          "path" => "/repos/octo/repo/issues/42",
+          "body" => %{"state" => "closed"}
+        },
+        issue: issue,
+        github_client: fn _, _, _, _, _ -> flunk("reloaded policy must still deny close") end
+      )
+
+    refute denied["success"]
+  end
+
+  test "adapter audits closed issues only when the merged-PR policy is active" do
+    Application.put_env(:symphony_elixir, :github_client_module, FakeGitHubClient)
+    issue = %Issue{id: "42", identifier: "GH-42", url: "https://github.com/octo/repo/issues/42"}
+
+    assert :ok = GitHubAdapter.audit_terminal_issue(issue, tracker_settings())
+    refute_received {:github_audit_path, _}
+
+    assert {:error, :out_of_band_closure} =
+             GitHubAdapter.audit_terminal_issue(issue, Map.put(tracker_settings(), :completion_policy, "merged_pr"))
+
+    assert_received {:github_audit_path, "/repos/octo/repo/issues/42/comments"}
+  end
+
   defp tracker_settings(provider_overrides \\ %{}) do
     %{
       kind: "github",
@@ -544,18 +588,24 @@ defmodule SymphonyElixir.GitHub.AdapterTest do
     }
   end
 
-  defp write_github_workflow!(path, token) do
+  defp write_github_workflow!(path, token, completion_policy \\ nil) do
+    completion_line = if completion_policy, do: "  completion_policy: #{completion_policy}\n", else: ""
+
     File.write!(
       path,
       """
       ---
       tracker:
         kind: github
-        provider:
+      #{completion_line}  provider:
           repo: "octo/repo"
           token: #{Jason.encode!(token)}
         active_states: ["open"]
         terminal_states: ["closed"]
+      codex:
+        turn_sandbox_policy:
+          type: workspaceWrite
+          networkAccess: false
       ---
 
       You are working on {{ issue.identifier }}.

@@ -91,7 +91,18 @@ defmodule SymphonyElixir.AgentRunner do
 
     with {:ok, session} <- AppServer.start_session(workspace, worker_host: worker_host) do
       try do
-        do_run_codex_turns(session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, 1, max_turns)
+        bound_opts = Keyword.put(opts, :completion_policy, session.dynamic_tool_binding.completion_policy)
+
+        do_run_codex_turns(
+          session,
+          workspace,
+          issue,
+          codex_update_recipient,
+          bound_opts,
+          issue_state_fetcher,
+          1,
+          max_turns
+        )
       after
         AppServer.stop_session(session)
       end
@@ -143,18 +154,30 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp build_turn_prompt(issue, opts, 1, _max_turns), do: PromptBuilder.build_prompt(issue, opts)
 
-  defp build_turn_prompt(_issue, _opts, 2, 2) do
+  defp build_turn_prompt(_issue, opts, 2, 2) do
     if Config.settings!().agent.block_on_max_turns do
+      handoff =
+        if opts[:completion_policy] == "merged_pr" do
+          "If the pull request has merged, call `github_complete_issue` for the current issue."
+        else
+          "If the pull request has merged, finish the workflow's required handoff and close the current issue in the stated order."
+        end
+
+      landing =
+        if opts[:completion_policy] == "merged_pr" do
+          "If an open PR exists, finish checks and merge it through `github_api` now. An open PR is not completion."
+        else
+          "If you created or found an open pull request for the current issue, invoke `$land` now. An open pull request is not completion and \"awaiting landing\" is not an acceptable final status."
+        end
+
       """
       Finalization guidance:
 
       - This is the only follow-up turn before Symphony stops this still-active issue.
-      - If you created or found an open pull request for the current issue, invoke `$land` now. An
-        open pull request is not completion and "awaiting landing" is not an acceptable final status.
+      - #{landing}
       - If `$land` cannot merge because of a real external blocker, add one concise comment to the
         current issue with that exact blocker, then end the turn. Do not make unrelated code changes.
-      - If the pull request has merged, finish the workflow's required handoff and close the current
-        issue in the stated order.
+      - #{handoff}
       """
     else
       continuation_prompt(2, 2)
@@ -183,6 +206,7 @@ defmodule SymphonyElixir.AgentRunner do
         if active_issue_state?(refreshed_issue.state) and issue_routable?(refreshed_issue) do
           {:continue, refreshed_issue}
         else
+          audit_if_terminal(refreshed_issue)
           {:done, refreshed_issue}
         end
 
@@ -195,6 +219,20 @@ defmodule SymphonyElixir.AgentRunner do
   end
 
   defp continue_with_issue?(issue, _issue_state_fetcher), do: {:done, issue}
+
+  defp audit_if_terminal(%Issue{} = issue) do
+    terminal? =
+      Enum.any?(Config.settings!().tracker.terminal_states, fn state ->
+        normalize_issue_state(state) == normalize_issue_state(issue.state)
+      end)
+
+    if terminal? do
+      case Tracker.audit_terminal_issue(issue) do
+        :ok -> :ok
+        {:error, reason} -> Logger.error("GitHub completion policy violation issue=#{issue.identifier} reason=#{inspect(reason)}")
+      end
+    end
+  end
 
   defp notify_max_turns_reached(recipient, %Issue{id: issue_id}, turn_session, max_turns)
        when is_pid(recipient) and is_binary(issue_id) and is_integer(max_turns) do

@@ -448,6 +448,7 @@ defmodule SymphonyElixir.Orchestrator do
   defp reconcile_issue_state(%Issue{} = issue, state, active_states, terminal_states) do
     cond do
       terminal_issue_state?(issue.state, terminal_states) ->
+        audit_terminal_issue(issue)
         Logger.info("Issue moved to terminal state: #{issue_context(issue)} state=#{issue.state}; stopping active agent")
 
         terminate_running_issue(state, issue.id, true)
@@ -483,6 +484,7 @@ defmodule SymphonyElixir.Orchestrator do
   defp reconcile_blocked_issue_state(%Issue{} = issue, state, active_states, terminal_states) do
     cond do
       terminal_issue_state?(issue.state, terminal_states) ->
+        audit_terminal_issue(issue)
         Logger.info("Blocked issue moved to terminal state: #{issue_context(issue)} state=#{issue.state}; releasing block")
         cleanup_issue_workspace(issue, Map.get(state.blocked, issue.id, %{}))
         release_issue_claim(state, issue.id)
@@ -501,6 +503,13 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp reconcile_blocked_issue_state(_issue, state, _active_states, _terminal_states), do: state
+
+  defp audit_terminal_issue(issue) do
+    case Tracker.audit_terminal_issue(issue) do
+      :ok -> :ok
+      {:error, reason} -> Logger.error("GitHub completion policy violation issue=#{issue.identifier} reason=#{inspect(reason)}")
+    end
+  end
 
   defp reconcile_missing_running_issue_ids(%State{} = state, requested_issue_ids, issues)
        when is_list(requested_issue_ids) and is_list(issues) do
@@ -1606,11 +1615,13 @@ defmodule SymphonyElixir.Orchestrator do
   defp turn_count_for_update(_existing_count, _existing_session_id, _update), do: 0
 
   defp summarize_codex_update(update) do
-    %{
+    summary = %{
       event: update[:event],
       message: update[:payload] || update[:raw],
       timestamp: update[:timestamp]
     }
+
+    if is_map(update[:result]), do: Map.put(summary, :result, update[:result]), else: summary
   end
 
   defp schedule_tick(%State{} = state, delay_ms) when is_integer(delay_ms) and delay_ms >= 0 do

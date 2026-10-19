@@ -3,6 +3,9 @@
 # shared Markdown prompt. Both paths must be relative and remain under the sibling
 # `workflow-libraries/` directory; library roots and sources cannot be symbolic links. The entry
 # overrides library configuration.
+# GitHub workflow entries may set tracker.completion_policy: merged_pr. Such entries require a
+# workspaceWrite Codex turn policy with networkAccess: false and use Symphony's host-side
+# github_push_branch/github_complete_issue tools for serial delivery.
 tracker:
   kind: linear
   provider:

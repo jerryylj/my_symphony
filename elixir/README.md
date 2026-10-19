@@ -155,6 +155,21 @@ Notes:
 - `tracker.required_labels` is optional. When set, an issue must have every
   configured label to dispatch or continue running. Label matching ignores
   case and surrounding whitespace. A blank configured label matches no issue.
+- `tracker.completion_policy: merged_pr` is an optional GitHub-only policy. It gives the agent
+  `github_complete_issue` and `github_push_branch` tools. The agent may read GitHub data, comment on
+  its current issue, and create/update/merge PRs through `github_api`, but raw issue state and
+  successor label writes are denied. Symphony verifies the merged PR, labels the immediate
+  successor, and closes the current issue. A missing or open PR leaves the issue active; the
+  configured max-turn policy can pause a genuinely stalled run.
+- A `merged_pr` workflow must use `workspace-write` with a `workspaceWrite` turn policy and
+  `networkAccess: false`; remote SSH workers are unsupported. Symphony does not auto-approve
+  command escalation requests for these sessions. The host-side push tool validates the current
+  feature branch and origin before pushing.
+- Before enabling `merged_pr` for a repository, disable GitHub's **Auto-close issues with merged
+  linked pull requests** setting under repository Settings → General → Issues. Merge a disposable
+  linked PR and confirm the issue remains open until `github_complete_issue` runs. Symphony does
+  not verify this repository setting automatically. A GitHub close without a
+  Symphony completion marker is logged as a policy violation.
 - Safer Codex defaults are used when policy fields are omitted:
   - `codex.approval_policy` defaults to `{"reject":{"sandbox_approval":true,"rules":true,"mcp_elicitations":true}}`
   - `codex.thread_sandbox` defaults to `workspace-write`
@@ -279,6 +294,12 @@ codex:
   Symphony executes it host-side with the session-bound token, removes configured tracker
   credentials and provider authentication aliases from the Codex child, and leaves raw tool access
   limited by that token's GitHub permissions.
+- In `merged_pr` mode, `github_api` allows GET requests, current-issue comments, and PR
+  create/update/merge requests. The Codex shell cannot reach GitHub, so use `github_push_branch`
+  instead of `git push`; use `github_complete_issue` after the PR merge. Its outcomes include
+  `no_pr`, `open_pr`, `wrong_base`, `unrelated_pr`, `ambiguous_pr`, `external_blocker`, and
+  `completed`. The completion marker allows interrupted handoffs to resume without repeating
+  comments, labels, or closure.
 
 ### Jira Cloud adapter
 

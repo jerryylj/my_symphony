@@ -16,6 +16,8 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.Asana.Client,
           SymphonyElixir.Config,
           SymphonyElixir.GitHub.Client,
+          SymphonyElixir.GitHub.Completion,
+          SymphonyElixir.GitHub.Push,
           SymphonyElixir.GitLab.Client,
           SymphonyElixir.Jira.Client,
           SymphonyElixir.Linear.Client,

@@ -2,9 +2,9 @@ defmodule SymphonyElixir.Tracker do
   @moduledoc """
   Adapter boundary for issue tracker reads and provider-native agent tools.
 
-  The orchestrator only depends on the read callbacks. Agent-side mutations stay
-  behind optional provider-native tools so tracker-specific capabilities do not
-  leak into scheduler policy.
+  The orchestrator depends on the read callbacks. Provider-native tools own
+  agent-side mutations; opted-in GitHub completion runs through a verified
+  host-side operation at this adapter boundary.
   """
 
   alias SymphonyElixir.Config
@@ -25,10 +25,12 @@ defmodule SymphonyElixir.Tracker do
   @callback execute_agent_tool(String.t(), term(), keyword()) :: map()
   @callback secret_environment_names(map()) :: [String.t()]
   @callback validate_config(map()) :: :ok | {:error, term()}
+  @callback audit_terminal_issue(Issue.t(), map()) :: :ok | {:error, term()}
 
   @optional_callbacks agent_tool_specs: 0,
                       execute_agent_tool: 3,
-                      validate_config: 1
+                      validate_config: 1,
+                      audit_terminal_issue: 2
 
   @spec fetch_issues_by_states([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
   def fetch_issues_by_states(states) do
@@ -38,6 +40,18 @@ defmodule SymphonyElixir.Tracker do
   @spec fetch_issues_by_ids([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
   def fetch_issues_by_ids(issue_ids) do
     adapter().fetch_issues_by_ids(issue_ids)
+  end
+
+  @spec audit_terminal_issue(Issue.t()) :: :ok | {:error, term()}
+  def audit_terminal_issue(%Issue{} = issue) do
+    settings = Config.settings!().tracker
+    selected_adapter = adapter_for_settings!(settings)
+
+    if function_exported?(selected_adapter, :audit_terminal_issue, 2) do
+      selected_adapter.audit_terminal_issue(issue, settings)
+    else
+      :ok
+    end
   end
 
   @doc """
@@ -53,14 +67,16 @@ defmodule SymphonyElixir.Tracker do
     %{
       adapter: adapter,
       tracker_settings: tracker_settings,
-      tool_specs: adapter_agent_tool_specs(adapter),
+      workspace_root: Config.local_workspace_root(),
+      completion_policy: Map.get(tracker_settings, :completion_policy),
+      tool_specs: adapter_agent_tool_specs(adapter, tracker_settings),
       secret_environment_names: adapter_secret_environment_names(adapter, tracker_settings)
     }
   end
 
   @spec execute_bound_agent_tool(map(), String.t(), term(), keyword()) :: map()
   def execute_bound_agent_tool(
-        %{adapter: adapter, tracker_settings: tracker_settings},
+        %{adapter: adapter, tracker_settings: tracker_settings} = binding,
         tool,
         arguments,
         opts \\ []
@@ -69,7 +85,10 @@ defmodule SymphonyElixir.Tracker do
       adapter,
       tool,
       arguments,
-      Keyword.put(opts, :tracker_settings, tracker_settings)
+      opts
+      |> Keyword.put(:tracker_settings, tracker_settings)
+      |> Keyword.put(:workspace_root, Map.get(binding, :workspace_root))
+      |> Keyword.put(:completion_policy, Map.get(tracker_settings, :completion_policy))
     )
   end
 
@@ -103,11 +122,16 @@ defmodule SymphonyElixir.Tracker do
     adapter
   end
 
-  defp adapter_agent_tool_specs(adapter) do
-    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :agent_tool_specs, 0) do
-      adapter.agent_tool_specs()
-    else
-      []
+  defp adapter_agent_tool_specs(adapter, tracker_settings) do
+    cond do
+      Code.ensure_loaded?(adapter) and function_exported?(adapter, :agent_tool_specs, 1) ->
+        adapter.agent_tool_specs(tracker_settings)
+
+      Code.ensure_loaded?(adapter) and function_exported?(adapter, :agent_tool_specs, 0) ->
+        adapter.agent_tool_specs()
+
+      true ->
+        []
     end
   end
 
