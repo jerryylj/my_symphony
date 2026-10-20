@@ -8,7 +8,7 @@ port="${SYMPHONY_PORT:-4102}"
 escript="${MISE_ESCRIPT:-$HOME/.local/share/mise/installs/erlang/28.5/bin/escript}"
 symphony_bin="${SYMPHONY_EXECUTABLE:-$repo_root/elixir/bin/symphony}"
 
-export PATH="$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+export PATH="$HOME/.npm-global/bin:/opt/homebrew/opt/node@24/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 env_file="${SYMPHONY_GITHUB_TOKEN_FILE:-$HOME/.config/symphony/stock-manage/GITHUB_TOKEN}"
 model_env_file="${SYMPHONY_MODEL_ENV_FILE:-$HOME/.config/symphony/stock-manage/environment}"
 

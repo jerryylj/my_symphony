@@ -29,3 +29,9 @@ not inherit a terminal session's credentials. Later deployments retain the saved
 credentials if those values are not present in the terminal environment.
 
 LaunchAgent logs are under `~/Library/Logs/Symphony/`.
+
+The service launchers include Homebrew's Node 24 directory
+(`/opt/homebrew/opt/node@24/bin`) in `PATH`. The npm-installed `codex` command needs
+`node`, and LaunchAgents do not inherit the terminal's shell setup. Without this
+directory, Symphony can start its dashboard while agent runs fail immediately
+with `env: node: No such file or directory` (exit 127) and enter retry backoff.
