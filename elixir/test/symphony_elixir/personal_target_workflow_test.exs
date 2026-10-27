@@ -101,7 +101,7 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
     assert prompt =~ "Having only `ready-for-agent` means `agent-ready` is missing"
   end
 
-  test "GitHub target workflows supply each issue workspace with network access" do
+  test "GitHub target workflows select the Git-writable workspace permission profile" do
     paths = [
       Path.expand("../../../my/WORKFLOW.md", __DIR__),
       Path.expand("../../../my/stock_manage/WORKFLOW.md", __DIR__),
@@ -123,12 +123,15 @@ defmodule SymphonyElixir.PersonalTargetWorkflowTest do
       assert {:ok, %{config: config}} = Workflow.load(path)
       assert {:ok, settings} = Schema.parse(config)
 
-      assert {:ok, policy} =
-               Schema.resolve_runtime_turn_sandbox_policy(settings, System.tmp_dir!())
-
-      assert policy["type"] == "workspaceWrite"
-      assert policy["networkAccess"]
-      assert policy["writableRoots"] != []
+      if path == Path.expand("../../../my/WORKFLOW.md", __DIR__) do
+        assert {:ok, policy} = Schema.resolve_runtime_turn_sandbox_policy(settings, System.tmp_dir!())
+        assert policy["type"] == "workspaceWrite"
+        assert policy["networkAccess"]
+        assert policy["writableRoots"] != []
+      else
+        assert settings.codex.permission_profile == "symphony-git"
+        assert {:ok, nil} = Schema.resolve_runtime_turn_sandbox_policy(settings, System.tmp_dir!())
+      end
     end)
   end
 end

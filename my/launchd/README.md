@@ -35,3 +35,39 @@ The service launchers include Homebrew's Node 24 directory
 `node`, and LaunchAgents do not inherit the terminal's shell setup. Without this
 directory, Symphony can start its dashboard while agent runs fail immediately
 with `env: node: No such file or directory` (exit 127) and enter retry backoff.
+
+## Task workspace Git permissions
+
+The shared GitHub workflow selects `codex.permission_profile: symphony-git`.
+Define that profile in `~/.codex/config.toml` for the user running the services:
+
+```toml
+[permissions.symphony-git]
+extends = ":workspace"
+
+[permissions.symphony-git.filesystem.":workspace_roots"]
+".git" = "write"
+
+[permissions.symphony-git.network]
+enabled = true
+```
+
+This allows branch creation and commits in each issue's original checkout. The
+remaining workspace protections, including read-only `.codex` and `.agents`
+directories, are inherited. Symphony selects the profile when starting the
+Codex thread and does not replace it with a legacy sandbox policy on later turns.
+The profile definition alone does not change permissions for other Codex sessions.
+
+To deploy a new executable and shared permission selection while preserving
+temporary model overrides in the deployed `WORKFLOW.md` files, build and copy
+only those two runtime files, then restart both services:
+
+```bash
+(cd elixir && mix build)
+runtime="$HOME/Library/Application Support/Symphony/runtime"
+install -m 755 elixir/bin/symphony "$runtime/elixir/bin/symphony"
+install -m 644 my/workflow-libraries/github-serial.yml \
+  "$runtime/my/workflow-libraries/github-serial.yml"
+launchctl kickstart -k "gui/$(id -u)/com.symphony.stock-manage"
+launchctl kickstart -k "gui/$(id -u)/com.symphony.vedio-monitor-model"
+```

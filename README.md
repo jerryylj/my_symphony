@@ -29,6 +29,8 @@ Tell your favorite coding agent to build Symphony in a programming language of y
 
 Check out [elixir/README.md](elixir/README.md) for instructions on how to set up your environment
 and run the Elixir-based Symphony implementation, including reusable project workflow libraries.
+Workflows can select named Codex permission profiles to allow Git metadata writes inside task
+workspaces while retaining the remaining workspace protections.
 You can also ask your favorite coding agent to help with the setup:
 
 > Set up Symphony for my repository based on

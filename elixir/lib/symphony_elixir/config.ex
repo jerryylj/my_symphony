@@ -22,8 +22,9 @@ defmodule SymphonyElixir.Config do
 
   @type codex_runtime_settings :: %{
           approval_policy: String.t() | map(),
+          permission_profile: String.t() | nil,
           thread_sandbox: String.t(),
-          turn_sandbox_policy: map()
+          turn_sandbox_policy: map() | nil
         }
 
   @spec settings() :: {:ok, Schema.t()} | {:error, term()}
@@ -55,7 +56,7 @@ defmodule SymphonyElixir.Config do
 
   def max_concurrent_agents_for_state(_state_name), do: settings!().agent.max_concurrent_agents
 
-  @spec codex_turn_sandbox_policy(Path.t() | nil) :: map()
+  @spec codex_turn_sandbox_policy(Path.t() | nil) :: map() | nil
   def codex_turn_sandbox_policy(workspace \\ nil) do
     case Schema.resolve_runtime_turn_sandbox_policy(settings!(), workspace) do
       {:ok, policy} ->
@@ -106,6 +107,7 @@ defmodule SymphonyElixir.Config do
         {:ok,
          %{
            approval_policy: settings.codex.approval_policy,
+           permission_profile: settings.codex.permission_profile,
            thread_sandbox: settings.codex.thread_sandbox,
            turn_sandbox_policy: turn_sandbox_policy
          }}

@@ -1497,6 +1497,42 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
            }
   end
 
+  test "named permission profile takes precedence over legacy sandbox policies" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      codex_permission_profile: " symphony-git ",
+      codex_thread_sandbox: "workspace-write",
+      codex_turn_sandbox_policy: %{type: "workspaceWrite", networkAccess: true}
+    )
+
+    assert Config.settings!().codex.permission_profile == "symphony-git"
+    assert Schema.resolve_turn_sandbox_policy(Config.settings!()) == nil
+    assert {:ok, settings} = Config.codex_runtime_settings()
+    assert settings.permission_profile == "symphony-git"
+    assert settings.turn_sandbox_policy == nil
+    assert Config.codex_turn_sandbox_policy() == nil
+
+    write_workflow_file!(Workflow.workflow_file_path(), codex_permission_profile: nil)
+    assert {:ok, settings} = Config.codex_runtime_settings()
+    assert settings.permission_profile == nil
+    assert settings.turn_sandbox_policy["type"] == "workspaceWrite"
+  end
+
+  test "named permission profile rejects empty names" do
+    for profile <- ["", "   "] do
+      write_workflow_file!(Workflow.workflow_file_path(), codex_permission_profile: profile)
+      assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+      assert message =~ "permission_profile"
+    end
+  end
+
+  test "named permission profile rejects non-string names" do
+    for profile <- [42, true, %{"name" => "symphony-git"}] do
+      write_workflow_file!(Workflow.workflow_file_path(), codex_permission_profile: profile)
+      assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+      assert message =~ "permission_profile"
+    end
+  end
+
   test "runtime sandbox policy resolution supplies issue roots for partial workspace-write policies" do
     test_root =
       Path.join(
@@ -1574,6 +1610,18 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert {:error, {:path_canonicalize_failed, ^expanded_path, :enametoolong}} =
              SymphonyElixir.PathSafety.canonicalize(path)
+  end
+
+  test "partial sandbox policies propagate workspace canonicalization errors" do
+    path = Path.join(System.tmp_dir!(), String.duplicate("a", 300))
+    expanded_path = Path.expand(path)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      codex_turn_sandbox_policy: %{type: "workspaceWrite", networkAccess: true}
+    )
+
+    assert {:error, {:path_canonicalize_failed, ^expanded_path, :enametoolong}} =
+             Config.codex_runtime_settings(path)
   end
 
   test "runtime sandbox policy resolution defaults when omitted and ignores workspace for explicit policies" do

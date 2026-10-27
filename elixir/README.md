@@ -163,6 +163,11 @@ Notes:
   app-server update resets it; it is not a total turn runtime cap.
 - Supported `codex.approval_policy` values depend on the targeted Codex app-server version. In the current local Codex schema, string values include `untrusted`, `on-failure`, `on-request`, and `never`, and object-form `reject` is also supported.
 - Supported `codex.thread_sandbox` values: `read-only`, `workspace-write`, `danger-full-access`.
+- `codex.permission_profile` optionally selects a named Codex permission profile. When set, it
+  takes precedence over `thread_sandbox` and `turn_sandbox_policy`: Symphony sends `permissions`
+  on `thread/start` and leaves later turns to inherit that profile. Define the named profile in
+  the Codex configuration available on each worker host. An unknown or disallowed profile causes
+  session startup to fail; Symphony does not fall back to broader permissions.
 - When `codex.turn_sandbox_policy` is set explicitly, Symphony passes the map through to Codex
   unchanged. Compatibility then depends on the targeted Codex app-server version rather than local
   Symphony validation.

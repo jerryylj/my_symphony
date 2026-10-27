@@ -484,6 +484,11 @@ fields locally if they want stricter startup checks.
   - Default: implementation-defined.
 - `thread_sandbox` (Codex `SandboxMode` value)
   - Default: implementation-defined.
+- `permission_profile` (optional string)
+  - Selects a named Codex permission profile using `thread/start.permissions`.
+  - When configured, takes precedence over `thread_sandbox` and `turn_sandbox_policy`.
+    Omit legacy sandbox fields on thread creation and subsequent turns so the named profile
+    remains active. The profile must be available and allowed on the worker host.
 - `turn_sandbox_policy` (Codex `SandboxPolicy` value)
   - Default: implementation-defined.
 - `turn_timeout_ms` (integer)

@@ -14,7 +14,4 @@ agent:
   max_concurrent_agents: 1
 codex:
   approval_policy: never
-  thread_sandbox: workspace-write
-  turn_sandbox_policy:
-    type: workspaceWrite
-    networkAccess: true
+  permission_profile: symphony-git

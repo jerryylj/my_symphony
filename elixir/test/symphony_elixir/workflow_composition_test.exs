@@ -294,6 +294,59 @@ defmodule SymphonyElixir.WorkflowCompositionTest do
     assert {:error, {:invalid_workflow_include, ^entry, "include", :workflow_library_root_must_not_be_symlink}} = Workflow.load(entry)
   end
 
+  test "workflow entry rejects invalid composition field types" do
+    root = temporary_root()
+    entry = Path.join(root, "my/stock_manage/WORKFLOW.md")
+    File.mkdir_p!(Path.dirname(entry))
+    File.mkdir_p!(Path.join(root, "my/workflow-libraries"))
+
+    File.write!(entry, "---\ninclude: not-a-list\n---\n")
+    assert {:error, {:invalid_workflow_include, ^entry, "include", :must_be_a_list}} = Workflow.load(entry)
+
+    File.write!(entry, "---\ninclude: [42]\n---\n")
+    assert {:error, {:invalid_workflow_include, ^entry, 42, :must_reference_yaml}} = Workflow.load(entry)
+
+    File.write!(entry, "---\nprompt_file: 42\n---\n")
+    assert {:error, {:invalid_workflow_prompt_file, ^entry}} = Workflow.load(entry)
+  end
+
+  test "workflow entry rejects a library whose YAML is not a mapping" do
+    root = temporary_root()
+    entry = Path.join(root, "my/stock_manage/WORKFLOW.md")
+    library_root = Path.join(root, "my/workflow-libraries")
+    File.mkdir_p!(Path.dirname(entry))
+    File.mkdir_p!(library_root)
+    File.write!(Path.join(library_root, "invalid.yml"), "- not-a-mapping\n")
+    File.write!(entry, "---\ninclude: [../workflow-libraries/invalid.yml]\n---\n")
+
+    assert {:error, {:invalid_workflow_include, ^entry, "../workflow-libraries/invalid.yml", {:workflow_library_not_a_map, path}}} = Workflow.load(entry)
+    assert Path.basename(path) == "invalid.yml"
+  end
+
+  test "workflow entry reports missing and non-directory library roots" do
+    root = temporary_root()
+    entry = Path.join(root, "my/stock_manage/WORKFLOW.md")
+    library_root = Path.join(root, "my/workflow-libraries")
+    File.mkdir_p!(Path.dirname(entry))
+    File.write!(entry, "---\ninclude: [../workflow-libraries/shared.yml]\n---\n")
+
+    assert {:error, {:invalid_workflow_include, ^entry, "include", :enoent}} = Workflow.load(entry)
+
+    File.write!(library_root, "not a directory")
+    assert {:error, {:invalid_workflow_include, ^entry, "include", :workflow_library_root_must_be_directory}} = Workflow.load(entry)
+  end
+
+  test "workflow entry reports filesystem errors for an invalid library source path" do
+    root = temporary_root()
+    entry = Path.join(root, "my/stock_manage/WORKFLOW.md")
+    File.mkdir_p!(Path.dirname(entry))
+    File.mkdir_p!(Path.join(root, "my/workflow-libraries"))
+    include_path = "../workflow-libraries/" <> String.duplicate("a", 300) <> ".yml"
+    File.write!(entry, "---\ninclude: [#{include_path}]\n---\n")
+
+    assert {:error, {:invalid_workflow_include, ^entry, ^include_path, :enametoolong}} = Workflow.load(entry)
+  end
+
   defp temporary_root do
     root = Path.join(System.tmp_dir!(), "symphony-workflow-composition-#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf!(root) end)

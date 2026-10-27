@@ -272,6 +272,105 @@ defmodule SymphonyElixir.AppServerTest do
     end
   end
 
+  test "named permission profiles survive subsequent turns without legacy sandbox overrides" do
+    test_root = Path.join(System.tmp_dir!(), "symphony-permission-profile-#{System.unique_integer([:positive])}")
+    workspace = Path.join(test_root, "workspaces/MT-PROFILE")
+    codex_binary = Path.join(test_root, "fake-codex")
+    trace_file = Path.join(test_root, "requests.jsonl")
+    File.mkdir_p!(workspace)
+    on_exit(fn -> File.rm_rf(test_root) end)
+
+    File.write!(codex_binary, """
+    #!/bin/sh
+    count=0
+    while IFS= read -r line; do
+      count=$((count + 1))
+      printf '%s\\n' "$line" >> "#{trace_file}"
+      case "$count" in
+        1) printf '%s\\n' '{"id":1,"result":{}}' ;;
+        2) ;;
+        3) printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-profile"}}}' ;;
+        4|5)
+          printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-profile"}}}'
+          printf '%s\\n' '{"method":"turn/completed"}'
+          ;;
+      esac
+    done
+    """)
+
+    File.chmod!(codex_binary, 0o755)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      workspace_root: Path.join(test_root, "workspaces"),
+      codex_command: codex_binary,
+      codex_permission_profile: "symphony-git",
+      codex_thread_sandbox: "danger-full-access",
+      codex_turn_sandbox_policy: %{type: "dangerFullAccess"}
+    )
+
+    assert {:ok, session} = AppServer.start_session(workspace)
+
+    try do
+      issue = %Issue{id: "profile", identifier: "MT-PROFILE", title: "Keep Git writable", state: "In Progress"}
+      assert {:ok, _} = AppServer.run_turn(session, "first turn", issue)
+      assert {:ok, _} = AppServer.run_turn(session, "continuation turn", issue)
+
+      requests = trace_file |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+      initialize = Enum.find(requests, &(&1["method"] == "initialize"))
+      assert get_in(initialize, ["params", "capabilities", "experimentalApi"])
+      thread = Enum.find(requests, &(&1["method"] == "thread/start"))
+      assert thread["params"]["permissions"] == "symphony-git"
+      refute Map.has_key?(thread["params"], "sandbox")
+      turns = Enum.filter(requests, &(&1["method"] == "turn/start"))
+      assert length(turns) == 2
+      Enum.each(turns, fn turn -> refute Map.has_key?(turn["params"], "sandboxPolicy") end)
+    after
+      AppServer.stop_session(session)
+    end
+  end
+
+  test "a rejected named permission profile fails startup without a sandbox fallback" do
+    test_root = Path.join(System.tmp_dir!(), "symphony-rejected-profile-#{System.unique_integer([:positive])}")
+    workspace = Path.join(test_root, "workspaces/MT-PROFILE")
+    codex_binary = Path.join(test_root, "fake-codex")
+    trace_file = Path.join(test_root, "requests.jsonl")
+    File.mkdir_p!(workspace)
+    on_exit(fn -> File.rm_rf(test_root) end)
+
+    File.write!(codex_binary, """
+    #!/bin/sh
+    count=0
+    while IFS= read -r line; do
+      count=$((count + 1))
+      printf '%s\\n' "$line" >> "#{trace_file}"
+      case "$count" in
+        1) printf '%s\\n' '{"id":1,"result":{}}' ;;
+        2) ;;
+        3) printf '%s\\n' '{"id":2,"error":{"code":-32602,"message":"Unknown or disallowed permission profile"}}' ;;
+      esac
+    done
+    """)
+
+    File.chmod!(codex_binary, 0o755)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      workspace_root: Path.join(test_root, "workspaces"),
+      codex_command: codex_binary,
+      codex_permission_profile: "unavailable-profile"
+    )
+
+    assert {:error, {:response_error, %{"code" => -32_602, "message" => message}}} =
+             AppServer.start_session(workspace)
+
+    assert message == "Unknown or disallowed permission profile"
+    requests = trace_file |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+    threads = Enum.filter(requests, &(&1["method"] == "thread/start"))
+    assert [thread] = threads
+    assert thread["params"]["permissions"] == "unavailable-profile"
+    refute Map.has_key?(thread["params"], "sandbox")
+    refute Enum.any?(requests, &(&1["method"] == "turn/start"))
+  end
+
   test "app server marks request-for-input events as a hard failure" do
     test_root =
       Path.join(

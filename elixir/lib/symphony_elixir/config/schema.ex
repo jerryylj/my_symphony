@@ -198,6 +198,7 @@ defmodule SymphonyElixir.Config.Schema do
       )
 
       field(:thread_sandbox, :string, default: "workspace-write")
+      field(:permission_profile, :string)
       field(:turn_sandbox_policy, :map)
       field(:turn_timeout_ms, :integer, default: 3_600_000)
       field(:read_timeout_ms, :integer, default: 5_000)
@@ -213,6 +214,7 @@ defmodule SymphonyElixir.Config.Schema do
           :command,
           :approval_policy,
           :thread_sandbox,
+          :permission_profile,
           :turn_sandbox_policy,
           :turn_timeout_ms,
           :read_timeout_ms,
@@ -221,6 +223,10 @@ defmodule SymphonyElixir.Config.Schema do
         empty_values: []
       )
       |> validate_required([:command])
+      |> update_change(:permission_profile, fn profile ->
+        if is_binary(profile), do: String.trim(profile), else: profile
+      end)
+      |> validate_length(:permission_profile, min: 1)
       |> validate_change(:command, fn :command, command ->
         if command != "" and String.trim(command) == "" do
           [command: "can't be blank"]
@@ -324,10 +330,13 @@ defmodule SymphonyElixir.Config.Schema do
     end
   end
 
-  @spec resolve_turn_sandbox_policy(%__MODULE__{}, Path.t() | nil) :: map()
+  @spec resolve_turn_sandbox_policy(%__MODULE__{}, Path.t() | nil) :: map() | nil
   def resolve_turn_sandbox_policy(settings, workspace \\ nil) do
-    case settings.codex.turn_sandbox_policy do
-      %{} = policy ->
+    case {settings.codex.permission_profile, settings.codex.turn_sandbox_policy} do
+      {profile, _} when is_binary(profile) ->
+        nil
+
+      {nil, %{} = policy} ->
         if needs_workspace_root?(policy) do
           workspace
           |> default_workspace_root(settings.workspace.root)
@@ -347,10 +356,13 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   @spec resolve_runtime_turn_sandbox_policy(%__MODULE__{}, Path.t() | nil, keyword()) ::
-          {:ok, map()} | {:error, term()}
+          {:ok, map() | nil} | {:error, term()}
   def resolve_runtime_turn_sandbox_policy(settings, workspace \\ nil, opts \\ []) do
-    case settings.codex.turn_sandbox_policy do
-      %{} = policy ->
+    case {settings.codex.permission_profile, settings.codex.turn_sandbox_policy} do
+      {profile, _} when is_binary(profile) ->
+        {:ok, nil}
+
+      {nil, %{} = policy} ->
         merge_partial_policy(policy, settings.workspace.root, workspace, opts)
 
       _ ->
